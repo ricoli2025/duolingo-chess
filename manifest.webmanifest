@@ -1,0 +1,11 @@
+{
+  "name": "Duolingo 棋盘助手",
+  "short_name": "棋盘助手",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0d141b",
+  "theme_color": "#101820",
+  "icons": [
+    {"src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}
