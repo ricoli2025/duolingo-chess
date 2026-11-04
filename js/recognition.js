@@ -153,6 +153,33 @@ function contentScore(image, candidate) {
   return contrasts.slice(0, 24).reduce((sum, value) => sum + value, 0) / 24;
 }
 
+function exteriorUniformity(image, x, y, size) {
+  const scores = [];
+  const samples = 64;
+  const margin = Math.max(2, Math.round(size * 0.01));
+  const measure = values => {
+    const center = median(values.slice());
+    const deviation = median(values.map(value => Math.abs(value - center)));
+    return clamp(1 - deviation / 10);
+  };
+  if (y + size + margin < image.height) {
+    const values = [];
+    for (let i = 0; i < samples; i++) values.push(pixelLuma(image, x + (i + 0.5) * size / samples, y + size + margin));
+    scores.push(measure(values));
+  }
+  if (x - margin >= 0) {
+    const values = [];
+    for (let i = 0; i < samples; i++) values.push(pixelLuma(image, x - margin, y + (i + 0.5) * size / samples));
+    scores.push(measure(values));
+  }
+  if (x + size + margin < image.width) {
+    const values = [];
+    for (let i = 0; i < samples; i++) values.push(pixelLuma(image, x + size + margin, y + (i + 0.5) * size / samples));
+    scores.push(measure(values));
+  }
+  return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0.5;
+}
+
 function findGridCandidates(image) {
   const isLight = (x, y) => {
     if (x < 0 || y < 0 || x >= image.width || y >= image.height) return false;
@@ -168,7 +195,7 @@ function findGridCandidates(image) {
     const score = checkerScore(image, x, y, size);
     if (score < 4) return;
     const candidate = { x, y, size, score };
-    candidate.score += contentScore(image, candidate) * 0.5;
+    candidate.score += contentScore(image, candidate) * 0.5 + exteriorUniformity(image, x, y, size) * 20;
     const key = `${Math.round(x / 2)},${Math.round(y / 2)},${Math.round(size / 2)}`;
     if (!candidates.has(key) || candidates.get(key).score < candidate.score) candidates.set(key, candidate);
   };
@@ -465,11 +492,12 @@ export async function recognizeBoard(source, options = {}) {
     const pieceEvidence = recognized.cellResults.reduce((sum, cell, index) =>
       recognized.squares[index] ? sum + cell.confidence : sum, 0
     );
+    const geometry = exteriorUniformity(sourceImage, x, y, size);
     const entry = {
       ...recognized,
       location,
       pieceEvidence,
-      rank: pieceEvidence * 20 + location.confidence
+      rank: pieceEvidence * 20 + location.confidence + geometry * 30
     };
     evaluationCache.set(key, entry);
     return entry;
@@ -556,7 +584,31 @@ export async function recognizeBoard(source, options = {}) {
       .sort((a, b) => b.pieceEvidence - a.pieceEvidence)
       .slice(0, 3);
     const unit = Math.max(1, Math.max(dimensions.width, dimensions.height) / 640);
+    if (best.squares.filter(Boolean).length < 19) {
+      earlyFine: for (const entry of promising.slice(0, 1)) {
+        const origin = entry.location.board;
+        for (const sizeOffset of [-4, -2, 0, 2, 4]) {
+          for (const xOffset of [-2, -1, 0, 1, 2]) {
+            for (const yOffset of [-2, -1, 0, 1, 2]) {
+              const x = origin.x + xOffset;
+              const y = origin.y + yOffset;
+              const size = origin.size + sizeOffset;
+              if (size < 16 || x < 0 || y < 0 || x + size > dimensions.width || y + size > dimensions.height) continue;
+              const score = checkerScore(sourceImage, x, y, size, true);
+              const next = evaluateLocation({
+                board: { x, y, size },
+                confidence: clamp((score - 4) / 14),
+                score
+              });
+              if (next.rank > best.rank) best = next;
+              if (best.squares.filter(Boolean).length >= 19 && best.pieceEvidence > 12) break earlyFine;
+            }
+          }
+        }
+      }
+    }
     refineCandidates: for (const entry of promising) {
+      if (best.squares.filter(Boolean).length >= 19 && best.pieceEvidence > 12) break;
       const origin = entry.location.board;
       for (const sizeStep of [-5, -4, -3, -2.5, -2, -1, 0, 1, 2, 2.5, 3, 4, 5]) {
         for (const yStep of [-4, -2, -1, 0, 1, 2, 4]) {
@@ -572,6 +624,29 @@ export async function recognizeBoard(source, options = {}) {
           });
           if (next.rank > best.rank) best = next;
           if (best.squares.filter(Boolean).length >= 27 && best.pieceEvidence > 15) break refineCandidates;
+        }
+      }
+    }
+    if (best.squares.filter(Boolean).length < 19) {
+      fineCandidates: for (const entry of promising) {
+        const origin = entry.location.board;
+        for (const sizeOffset of [-4, -2, 0, 2, 4]) {
+          for (const xOffset of [-2, -1, 0, 1, 2]) {
+            for (const yOffset of [-2, -1, 0, 1, 2]) {
+              const x = origin.x + xOffset;
+              const y = origin.y + yOffset;
+              const size = origin.size + sizeOffset;
+              if (size < 16 || x < 0 || y < 0 || x + size > dimensions.width || y + size > dimensions.height) continue;
+              const score = checkerScore(sourceImage, x, y, size, true);
+              const next = evaluateLocation({
+                board: { x, y, size },
+                confidence: clamp((score - 4) / 14),
+                score
+              });
+              if (next.rank > best.rank) best = next;
+              if (best.squares.filter(Boolean).length >= 19 && best.pieceEvidence > 12) break fineCandidates;
+            }
+          }
         }
       }
     }

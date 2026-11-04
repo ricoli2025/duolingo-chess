@@ -11,15 +11,10 @@ const PIECES = Object.fromEntries(
 const NAMES = { K: '白王', Q: '白后', R: '白车', B: '白象', N: '白马', P: '白兵', k: '黑王', q: '黑后', r: '黑车', b: '黑象', n: '黑马', p: '黑兵' };
 const PROMOTIONS = { q: '后', r: '车', b: '象', n: '马' };
 const FILES = 'abcdefgh';
-const INITIAL_SQUARES = [
-  ...'rnbqkbnr', ...'pppppppp', ...Array(32).fill(null),
-  ...'PPPPPPPP', ...'RNBQKBNR'
-];
 const elements = Object.fromEntries([
-  'screenshot-input', 'manual-button', 'preview-section', 'screenshot-preview', 'status',
-  'position-section', 'confidence', 'board', 'orientation', 'turn', 'castling', 'piece-palette',
-  'initial-button', 'clear-board-button', 'clear-selection', 'analyze-button',
-  'result-section', 'best-move', 'uci-move', 'engine-detail'
+  'screenshot-input', 'preview-section', 'screenshot-preview', 'status',
+  'position-section', 'confidence', 'board', 'orientation', 'turn', 'castling',
+  'analyze-button', 'result-section', 'best-move', 'uci-move', 'engine-detail'
 ].map((id) => [id, document.getElementById(id)]));
 
 const state = {
@@ -27,10 +22,7 @@ const state = {
   orientation: 'white',
   turn: 'bottom',
   castling: 'none',
-  selected: null,
-  edited: new Set(),
   confidence: 1,
-  cellResults: [],
   analyzing: false,
   bestMove: null
 };
@@ -67,31 +59,26 @@ function renderBoard() {
     const row = Math.floor(index / 8);
     const col = index % 8;
     const name = squareName(index);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `square ${(row + col) % 2 ? 'light' : 'dark'}`;
-    if (state.selected === index) button.classList.add('selected');
-    const cellConfidence = state.cellResults[index]?.confidence;
-    if (!state.edited.has(index) && Number.isFinite(cellConfidence) && cellConfidence < 0.45) button.classList.add('uncertain');
+    const square = document.createElement('div');
+    square.className = `square ${(row + col) % 2 ? 'light' : 'dark'}`;
     if (state.bestMove) {
-      if (indexFromName(state.bestMove.slice(0, 2)) === index) button.classList.add('move-from');
-      if (indexFromName(state.bestMove.slice(2, 4)) === index) button.classList.add('move-to');
+      if (indexFromName(state.bestMove.slice(0, 2)) === index) square.classList.add('move-from');
+      if (indexFromName(state.bestMove.slice(2, 4)) === index) square.classList.add('move-to');
     }
-    button.setAttribute('role', 'gridcell');
-    button.setAttribute('aria-label', `${name} ${piece ? NAMES[piece] : '空格'}`);
-    button.dataset.index = index;
+    square.setAttribute('role', 'gridcell');
+    square.setAttribute('aria-label', `${name} ${piece ? NAMES[piece] : '空格'}`);
     if (piece) {
       const image = document.createElement('img');
       image.className = 'piece-image';
       image.src = PIECES[piece];
       image.alt = '';
-      button.append(image);
+      square.append(image);
     }
     const coordinate = document.createElement('small');
     coordinate.className = 'coordinate';
     coordinate.textContent = name;
-    button.append(coordinate);
-    fragment.append(button);
+    square.append(coordinate);
+    fragment.append(square);
   });
   elements.board.replaceChildren(fragment);
 }
@@ -111,35 +98,6 @@ function renderPosition() {
   elements.castling.value = state.castling;
   elements.confidence.textContent = `识别可信度 ${Math.round(state.confidence * 100)}%`;
   renderBoard();
-}
-
-function buildPalette() {
-  const fragment = document.createDocumentFragment();
-  for (const [label, pieces] of [['白棋', 'KQRBNP'], ['黑棋', 'kqrbnp']]) {
-    const heading = document.createElement('span');
-    heading.className = 'row-label';
-    heading.textContent = label;
-    fragment.append(heading);
-    for (const piece of pieces) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.dataset.piece = piece;
-      button.setAttribute('aria-label', NAMES[piece]);
-      const image = document.createElement('img');
-      image.className = 'piece-image';
-      image.src = PIECES[piece];
-      image.alt = '';
-      button.append(image);
-      fragment.append(button);
-    }
-    const erase = document.createElement('button');
-    erase.type = 'button';
-    erase.className = 'erase';
-    erase.dataset.piece = '';
-    erase.textContent = '空格';
-    fragment.append(erase);
-  }
-  elements['piece-palette'].replaceChildren(fragment);
 }
 
 function logicalPlacement() {
@@ -228,15 +186,12 @@ async function loadScreenshot(file) {
     state.squares = result.squares;
     state.orientation = result.orientation;
     state.turn = 'bottom';
-    state.selected = null;
-    state.edited.clear();
     state.confidence = result.confidence;
-    state.cellResults = result.cellResults || [];
     renderPosition();
-    setStatus('识别完成。请核对棋盘，再计算着法。');
+    setStatus('识别完成，可以直接计算着法。');
   } catch (error) {
     console.error(error);
-    setStatus(`${error.message || '无法识别这张图'}。可换一张完整截图，或选择“手动摆棋”。`, 'error');
+    setStatus(`${error.message || '无法识别这张图'}。请重新截取完整棋盘。`, 'error');
   } finally {
     URL.revokeObjectURL(url);
     elements['screenshot-input'].value = '';
@@ -254,8 +209,8 @@ async function analyze() {
     setStatus(`局面无效：${error.message}`, 'error');
     return;
   }
-  if (state.confidence < 0.35 && state.edited.size === 0) {
-    setStatus('识别可信度较低，请先核对并纠正标出的格子。', 'error');
+  if (state.confidence < 0.35) {
+    setStatus('无法可靠读取棋盘，请重新截取完整棋盘。', 'error');
     return;
   }
   if (position.game.isCheckmate()) {
@@ -289,7 +244,7 @@ async function analyze() {
     });
     if (bestMove === '(none)' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(bestMove)) throw new Error('引擎没有返回有效着法');
     const legal = position.game.moves({ verbose: true }).some((move) => move.from === bestMove.slice(0, 2) && move.to === bestMove.slice(2, 4) && (!move.promotion || move.promotion === bestMove[4]));
-    if (!legal) throw new Error('引擎着法与当前规则不符，请核对棋盘');
+    if (!legal) throw new Error('识别结果与下棋规则不符，请重新截图');
     state.bestMove = bestMove;
     const promotion = bestMove[4] ? `（升变为${PROMOTIONS[bestMove[4]]}）` : '';
     elements['best-move'].textContent = `${bestMove.slice(0, 2)} → ${bestMove.slice(2, 4)}${promotion}`;
@@ -310,51 +265,6 @@ async function analyze() {
 
 elements['screenshot-input'].addEventListener('change', (event) => loadScreenshot(event.target.files[0]));
 elements['analyze-button'].addEventListener('click', analyze);
-elements.board.addEventListener('click', (event) => {
-  const square = event.target.closest('.square');
-  if (!square) return;
-  const index = Number(square.dataset.index);
-  state.selected = state.selected === index ? null : index;
-  renderBoard();
-});
-elements['piece-palette'].addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-piece]');
-  if (!button) return;
-  if (state.selected === null) {
-    setStatus('请先点选棋盘上要修改的格子。');
-    return;
-  }
-  state.squares[state.selected] = button.dataset.piece || null;
-  state.edited.add(state.selected);
-  clearResult();
-  renderBoard();
-});
-elements['clear-selection'].addEventListener('click', () => {
-  state.selected = null;
-  renderBoard();
-});
-elements['initial-button'].addEventListener('click', () => {
-  state.squares = [...INITIAL_SQUARES];
-  state.orientation = 'white';
-  state.turn = 'bottom';
-  state.selected = null;
-  state.edited.clear();
-  state.cellResults = [];
-  state.confidence = 1;
-  clearResult();
-  renderPosition();
-  setStatus('已恢复初始局面。');
-});
-elements['clear-board-button'].addEventListener('click', () => {
-  state.squares = Array(64).fill(null);
-  state.selected = null;
-  state.edited.clear();
-  state.cellResults = [];
-  state.confidence = 1;
-  clearResult();
-  renderPosition();
-  setStatus('棋盘已清空。');
-});
 elements.orientation.addEventListener('change', () => {
   state.orientation = elements.orientation.value;
   clearResult();
@@ -370,20 +280,6 @@ elements.castling.addEventListener('change', () => {
   clearResult();
   renderBoard();
 });
-elements['manual-button'].addEventListener('click', () => {
-  state.squares = [...INITIAL_SQUARES];
-  state.orientation = 'white';
-  state.turn = 'bottom';
-  state.selected = null;
-  state.edited.clear();
-  state.cellResults = [];
-  state.confidence = 1;
-  clearResult();
-  renderPosition();
-  setStatus('已载入初始局面，可直接计算或点格修改；也可清空后重新摆棋。');
-});
-
-buildPalette();
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
