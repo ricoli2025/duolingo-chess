@@ -192,12 +192,13 @@ function findGridCandidates(image) {
     y = Math.round(y);
     size = Math.round(size);
     if (size < 32 || x < 0 || y < 0 || x + size > image.width || y + size > image.height) return;
+    const key = `${Math.round(x / 2)},${Math.round(y / 2)},${Math.round(size / 2)}`;
+    if (candidates.has(key)) return;
     const score = checkerScore(image, x, y, size);
     if (score < 4) return;
     const candidate = { x, y, size, score };
     candidate.score += contentScore(image, candidate) * 0.5 + exteriorUniformity(image, x, y, size) * 20;
-    const key = `${Math.round(x / 2)},${Math.round(y / 2)},${Math.round(size / 2)}`;
-    if (!candidates.has(key) || candidates.get(key).score < candidate.score) candidates.set(key, candidate);
+    candidates.set(key, candidate);
   };
   for (let y = 0; y < image.height; y += 2) {
     const runs = [];
@@ -560,7 +561,10 @@ export async function recognizeBoard(source, options = {}) {
       for (let x = 0; x <= scanImage.width - fastSize; x += fastStep) {
         const candidate = { x, y, size: fastSize };
         const score = checkerScore(scanImage, x, y, fastSize);
-        if (score >= 4) fastCandidates.push({ ...candidate, score: score + contentScore(scanImage, candidate) * 0.5 });
+        if (score >= 4) fastCandidates.push({
+          ...candidate,
+          score: score + contentScore(scanImage, candidate) * 0.5 + exteriorUniformity(scanImage, x, y, fastSize) * 20
+        });
       }
     }
     fastCandidates.sort((a, b) => b.score - a.score);
@@ -569,9 +573,14 @@ export async function recognizeBoard(source, options = {}) {
       const entry = evaluateLocation(toOriginalLocation(candidate));
       if (!fastBest || entry.rank > fastBest.rank) fastBest = entry;
     }
-    if (fastBest && fastBest.squares.filter(Boolean).length >= 28 && fastBest.pieceEvidence > 15) {
+    const fastGeometry = fastBest
+      ? exteriorUniformity(sourceImage, fastBest.location.board.x, fastBest.location.board.y, fastBest.location.board.size)
+      : 0;
+    const fastStable = fastBest && fastBest.penalty === 0 && fastBest.pieceEvidence > 12 && fastGeometry > 0.75;
+    if (fastBest && ((fastBest.squares.filter(Boolean).length >= 28 && fastBest.pieceEvidence > 15) || fastStable)) {
       locations = [fastBest.location];
     } else {
+      for (const candidate of fastCandidates.slice(0, 32)) addLocation(toOriginalLocation(candidate));
       const gridCandidates = findGridCandidates(scanImage);
       const candidates = gridCandidates.length >= 4 ? gridCandidates : findBoardCandidates(scanImage);
       for (const candidate of candidates) addLocation(toOriginalLocation(candidate));
@@ -593,7 +602,10 @@ export async function recognizeBoard(source, options = {}) {
     if (!best || entry.rank > best.rank) best = entry;
   }
 
-  if (!options.board && best) {
+  const stablePosition = entry => entry.penalty === 0 && entry.pieceEvidence > 12 &&
+    exteriorUniformity(sourceImage, entry.location.board.x, entry.location.board.y, entry.location.board.size) > 0.75;
+
+  if (!options.board && best && !stablePosition(best)) {
     const origin = best.location.board;
     const offset = origin.size / 8;
     for (const dx of [-1, 0, 1]) {
@@ -614,7 +626,7 @@ export async function recognizeBoard(source, options = {}) {
     }
   }
 
-  if (!options.board && best.squares.filter(Boolean).length < 28) {
+  if (!options.board && !stablePosition(best) && best.squares.filter(Boolean).length < 28) {
     const promising = evaluated.filter(entry => entry.pieceEvidence > 0.05)
       .sort((a, b) => b.pieceEvidence - a.pieceEvidence)
       .slice(0, 3);
@@ -687,7 +699,7 @@ export async function recognizeBoard(source, options = {}) {
     }
   }
 
-  if (!options.board && best.squares.filter(Boolean).length < 27) {
+  if (!options.board && !stablePosition(best) && best.squares.filter(Boolean).length < 27) {
     const origin = best.location.board;
     let step = Math.max(2, Math.round(origin.size * 0.04));
     while (true) {
@@ -722,7 +734,7 @@ export async function recognizeBoard(source, options = {}) {
     }
   }
 
-  if (!options.board && best.squares.filter(Boolean).length < 28 && best.pieceEvidence < 10) {
+  if (!options.board && !stablePosition(best) && best.squares.filter(Boolean).length < 28 && best.pieceEvidence < 10) {
     const origin = best.location.board;
     const offsets = [-12, -8, -4, 0, 4, 8, 12];
     for (const sizeOffset of offsets) {
@@ -744,7 +756,7 @@ export async function recognizeBoard(source, options = {}) {
     }
   }
 
-  if (!options.board && ((best.squares.filter(Boolean).length < 28 && best.pieceEvidence < 20) ||
+  if (!options.board && !stablePosition(best) && ((best.squares.filter(Boolean).length < 28 && best.pieceEvidence < 20) ||
       (best.squares.filter(Boolean).length >= 28 && best.squares.filter(Boolean).length < 32))) {
     const origin = best.location.board;
     const offsets = [-3, -2, -1, 0, 1, 2, 3];
