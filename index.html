@@ -74,18 +74,23 @@
       <div id="best-move" class="best-move"></div>
       <code id="uci-move"></code>
       <p id="engine-detail" class="hint"></p>
+      <button id="confirm-move" class="button analyze" type="button">确认着子</button>
     </section>
 
     <details class="help">
       <summary>使用方法与限制</summary>
       <ol>
-        <li>在 Duolingo 对局中截屏，棋盘和棋子要完整可见。</li>
-        <li>回到本页选择截图，程序会自动识别棋盘。</li>
-        <li>点击“计算最佳着法”，例如 <code>e2e4</code> 表示把 e2 的棋子走到 e4。</li>
+        <li>首次在 Duolingo 对局中截屏并导入，之后无需重复截图。</li>
+        <li>计算后点击“确认着子”，下方会自动按建议落子。</li>
+        <li>点选上方棋子及高亮终点，再重新计算下方建议。</li>
       </ol>
       <p>引擎在本机运行，首次加载约需几秒。请遵守所用产品的对局规则。</p>
     </details>
   </main>
+  <dialog id="promotion-dialog" class="promotion-dialog">
+    <h2>选择升变棋子</h2>
+    <div id="promotion-options" class="promotion-options"></div>
+  </dialog>
   <script>
     window.addEventListener('error', (event) => {
       const status = document.getElementById('status');

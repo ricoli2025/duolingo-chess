@@ -38,9 +38,13 @@ p { line-height: 1.55; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; }
 .confidence { font-size: 12px; color: var(--muted); }
 .board { width: 100%; aspect-ratio: 1; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); border: 3px solid #41525c; border-radius: 7px; overflow: hidden; margin: 14px 0; touch-action: manipulation; }
-.square { position: relative; display: flex; align-items: center; justify-content: center; color: #f2f4f5; min-width: 0; min-height: 0; aspect-ratio: 1; }
+.square { position: relative; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 0; padding: 0; color: #f2f4f5; min-width: 0; min-height: 0; aspect-ratio: 1; cursor: pointer; }
+.square:disabled { cursor: default; }
 .square.light { background: #34454e; }
 .square.dark { background: #18242b; }
+.square.selected { outline: 3px solid #ffd64d; outline-offset: -3px; z-index: 2; }
+.square.legal-target::after { content: ""; position: absolute; width: 24%; aspect-ratio: 1; border-radius: 50%; background: #a8b7bd88; }
+.square.legal-capture { box-shadow: inset 0 0 0 4px #d9e3e7aa; }
 .square.move-from { box-shadow: inset 0 0 0 4px #ffd64d; }
 .square.move-to { box-shadow: inset 0 0 0 4px var(--green); }
 .piece-image { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
@@ -53,7 +57,11 @@ select { display: block; width: 100%; margin-top: 6px; min-height: 44px; border:
 .result-section { margin-top: 18px; padding: 18px; border: 1px solid #4b6d35; border-radius: 16px; background: linear-gradient(135deg, #21331f, #15231c); text-align: center; }
 .best-move { font-size: clamp(36px, 11vw, 58px); font-weight: 800; letter-spacing: 1px; margin: 8px 0; }
 .result-section code { color: #c5e9a8; font-size: 17px; }
-.result-section .hint { margin-bottom: 0; }
+.result-section .hint { margin-bottom: 14px; }
+.promotion-dialog { width: min(90vw, 360px); border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: #edf3f6; text-align: center; padding: 22px; }
+.promotion-dialog::backdrop { background: #050a0dcc; backdrop-filter: blur(4px); }
+.promotion-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.promotion-option { aspect-ratio: 1; border: 1px solid var(--line); border-radius: 10px; background: #263842; padding: 0; cursor: pointer; }
 .help { color: var(--muted); font-size: 13px; line-height: 1.6; border-top: 1px solid var(--line); margin-top: 22px; padding-top: 14px; }
 .help summary { color: #d8e2e7; min-height: 34px; cursor: pointer; }
 .help li { margin-bottom: 6px; }
