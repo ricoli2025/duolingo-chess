@@ -474,6 +474,18 @@ function detectOrientation(squares) {
   return whiteEvidence >= blackEvidence ? 'white' : 'black';
 }
 
+function positionPenalty(squares) {
+  const count = piece => squares.filter(value => value === piece).length;
+  let penalty = Math.abs(count('K') - 1) * 4 + Math.abs(count('k') - 1) * 4;
+  for (const color of ['P', 'p']) {
+    penalty += Math.max(0, count(color) - 8) * 2;
+    for (let col = 0; col < 8; col++) {
+      if (squares[col] === color || squares[56 + col] === color) penalty += 3;
+    }
+  }
+  return penalty;
+}
+
 export async function recognizeBoard(source, options = {}) {
   const dimensions = sourceDimensions(source);
   const templatePromise = getTemplates(options);
@@ -493,11 +505,13 @@ export async function recognizeBoard(source, options = {}) {
       recognized.squares[index] ? sum + cell.confidence : sum, 0
     );
     const geometry = exteriorUniformity(sourceImage, x, y, size);
+    const penalty = positionPenalty(recognized.squares);
     const entry = {
       ...recognized,
       location,
       pieceEvidence,
-      rank: pieceEvidence * 20 + location.confidence + geometry * 30
+      penalty,
+      rank: pieceEvidence * 20 + location.confidence + geometry * 30 - penalty * 50
     };
     evaluationCache.set(key, entry);
     return entry;
@@ -577,6 +591,27 @@ export async function recognizeBoard(source, options = {}) {
     const entry = evaluateLocation(location);
     evaluated.push(entry);
     if (!best || entry.rank > best.rank) best = entry;
+  }
+
+  if (!options.board && best) {
+    const origin = best.location.board;
+    const offset = origin.size / 8;
+    for (const dx of [-1, 0, 1]) {
+      for (const dy of [-1, 0, 1]) {
+        if (!dx && !dy) continue;
+        const x = Math.round(origin.x + dx * offset);
+        const y = Math.round(origin.y + dy * offset);
+        const size = origin.size;
+        if (x < 0 || y < 0 || x + size > dimensions.width || y + size > dimensions.height) continue;
+        const score = checkerScore(sourceImage, x, y, size, true);
+        const next = evaluateLocation({
+          board: { x, y, size },
+          confidence: clamp((score - 4) / 14),
+          score
+        });
+        if (next.rank > best.rank) best = next;
+      }
+    }
   }
 
   if (!options.board && best.squares.filter(Boolean).length < 28) {

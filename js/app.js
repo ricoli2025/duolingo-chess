@@ -456,5 +456,15 @@ elements.castling.addEventListener('change', () => {
   renderBoard();
 });
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+  const updateWorker = () => {
+    navigator.serviceWorker.register('sw.js').then((registration) => registration.update()).catch(() => {});
+  };
+  updateWorker();
+  window.addEventListener('pageshow', updateWorker);
 }
