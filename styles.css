@@ -54,6 +54,7 @@ p { line-height: 1.55; }
 select { display: block; width: 100%; margin-top: 6px; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; color: #edf3f6; background: var(--panel); }
 .history-note { color: var(--muted); background: #121d24; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin: 10px 0 14px; }
 .analyze { width: 100%; background: var(--green); color: #102006; font-size: 17px; }
+.confirm-move { margin-top: 10px; }
 .result-section { margin-top: 18px; padding: 18px; border: 1px solid #4b6d35; border-radius: 16px; background: linear-gradient(135deg, #21331f, #15231c); text-align: center; }
 .best-move { font-size: clamp(36px, 11vw, 58px); font-weight: 800; letter-spacing: 1px; margin: 8px 0; }
 .result-section code { color: #c5e9a8; font-size: 17px; }

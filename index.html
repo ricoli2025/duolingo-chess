@@ -19,7 +19,7 @@
         <p class="eyebrow">STOCKFISH 19 · 本地计算</p>
         <h1>棋盘助手</h1>
       </div>
-      <span class="strength">v9 · 高强度</span>
+      <span class="strength">v10 · 高强度</span>
     </header>
 
     <section class="intro">
@@ -43,6 +43,15 @@
         <span id="confidence" class="confidence"></span>
       </div>
       <div id="board" class="board" role="grid" aria-label="识别出的棋盘"></div>
+      <button id="analyze-button" class="button analyze" type="button">计算最佳着法</button>
+      <button id="confirm-move" class="button analyze confirm-move" type="button" hidden>确认着子</button>
+
+      <section id="result-section" class="result-section" aria-live="polite" hidden>
+        <p class="eyebrow">建议着法</p>
+        <div id="best-move" class="best-move"></div>
+        <code id="uci-move"></code>
+        <p id="engine-detail" class="hint"></p>
+      </section>
 
       <div class="controls">
         <label>下方执子
@@ -64,17 +73,6 @@
           </select>
         </label>
       </div>
-
-      <div class="history-note">王车易位默认禁止。只有确认本局仍可易位时，才选择“按棋子位置允许”；程序还会检查国王和车是否位于初始格。静图不设置吃过路兵。</div>
-      <button id="analyze-button" class="button analyze" type="button">计算最佳着法</button>
-    </section>
-
-    <section id="result-section" class="result-section" aria-live="polite" hidden>
-      <p class="eyebrow">建议着法</p>
-      <div id="best-move" class="best-move"></div>
-      <code id="uci-move"></code>
-      <p id="engine-detail" class="hint"></p>
-      <button id="confirm-move" class="button analyze" type="button">确认着子</button>
     </section>
 
     <details class="help">
@@ -84,6 +82,7 @@
         <li>计算后点击“确认着子”，下方会自动按建议落子。</li>
         <li>点选上方棋子及高亮终点，再重新计算下方建议。</li>
       </ol>
+      <p class="history-note">王车易位默认禁止。只有确认本局仍可易位时，才选择“按棋子位置允许”；程序还会检查国王和车是否位于初始格。静图不设置吃过路兵。</p>
       <p>引擎在本机运行，首次加载约需几秒。请遵守所用产品的对局规则。</p>
     </details>
   </main>

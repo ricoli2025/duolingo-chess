@@ -133,6 +133,7 @@ function renderBoard() {
 function clearResult() {
   state.bestMove = null;
   elements['result-section'].hidden = true;
+  elements['confirm-move'].hidden = true;
   elements['best-move'].textContent = '';
   elements['uci-move'].textContent = '';
   elements['engine-detail'].textContent = '';
@@ -397,6 +398,7 @@ async function analyze() {
     const legal = game.moves({ verbose: true }).some((move) => move.from === bestMove.slice(0, 2) && move.to === bestMove.slice(2, 4) && (!move.promotion || move.promotion === bestMove[4]));
     if (!legal) throw new Error('识别结果与下棋规则不符，请重新截图');
     state.bestMove = bestMove;
+    elements['confirm-move'].hidden = false;
     const promotion = bestMove[4] ? `（升变为${PROMOTIONS[bestMove[4]]}）` : '';
     elements['best-move'].textContent = `${bestMove.slice(0, 2)} → ${bestMove.slice(2, 4)}${promotion}`;
     elements['uci-move'].textContent = bestMove;
