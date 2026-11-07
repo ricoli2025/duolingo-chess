@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>cell inspect</title>
+<style>body{background:#333;color:#fff}canvas{image-rendering:pixelated;margin:4px;border:1px solid #666;float:left}</style>
+</head>
+<body>
+<pre id="out"></pre>
+<div id="row"></div>
+<script type="module">
+const TS = 56;
+const tjson = await (await fetch('../assets/piece-templates.json?v=' + Date.now())).json();
+const offset = tjson.offset;
+
+const img = new Image();
+await new Promise(res => { img.onload = res; img.src = 'images/dark-knight.png'; });
+
+// normalized board at (0,854,1170), extract a5 (row 3, col 0) like recognition does
+const board = { x: 0, y: 854, size: 1170 };
+const s = TS * 8;
+const canvas = document.createElement('canvas');
+canvas.width = s; canvas.height = s;
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+ctx.imageSmoothingQuality = 'high';
+ctx.drawImage(img, board.x, board.y, board.size, board.size, 0, 0, s, s);
+
+function renderCell(row, col, label) {
+  const data = ctx.getImageData(col * TS, row * TS, TS, TS).data;
+  const c = document.createElement('canvas');
+  c.width = TS; c.height = TS;
+  const cx = c.getContext('2d');
+  const im = cx.createImageData(TS, TS);
+  const corners = [];
+  const vals = new Float32Array(TS * TS);
+  const lumas = [];
+  for (let y = 0; y < TS; y++) {
+    for (let x = 0; x < TS; x++) {
+      const i = (y * TS + x) * 4;
+      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      vals[y * TS + x] = luma;
+      lumas.push(luma);
+      if ((x < 4 || x >= TS - 4) && (y < 4 || y >= TS - 4)) corners.push(luma);
+    }
+  }
+  corners.sort((a, b) => a - b);
+  const bg = corners[corners.length >> 1];
+  let mass = 0;
+  for (let i = 0; i < vals.length; i++) {
+    vals[i] -= bg;
+    if (Math.abs(vals[i]) > 15) mass += vals[i];
+  }
+  const flip = mass < 0;
+  for (let i = 0; i < im.data.length; i += 4) {
+    let v = vals[i / 4];
+    if (flip) v = -v;
+    const g = Math.max(0, Math.min(255, 128 + v * 1.5));
+    im.data[i] = g; im.data[i + 1] = g; im.data[i + 2] = g; im.data[i + 3] = 255;
+  }
+  cx.putImageData(im, 0, 0);
+  c.style.width = '112px';
+  const lab = document.createElement('div');
+  lab.textContent = label + ' bg=' + bg.toFixed(0) + ' mass=' + mass.toFixed(0) + (flip ? ' flipped' : '');
+  document.getElementById('row').appendChild(c);
+  document.getElementById('row').appendChild(lab);
+  return vals;
+}
+
+const a5 = renderCell(3, 0, 'a5');
+// f6 knight (row 2, col 5) for comparison
+const f6 = renderCell(2, 5, 'f6');
+
+function templateCanvas(key, label) {
+  const bin = atob(tjson.templates[key]);
+  const c = document.createElement('canvas');
+  c.width = TS; c.height = TS;
+  const cx = c.getContext('2d');
+  const im = cx.createImageData(TS, TS);
+  for (let i = 0; i < bin.length; i++) {
+    const g = Math.max(0, Math.min(255, 128 + (bin.charCodeAt(i) - offset) * 1.5));
+    im.data[i * 4] = g; im.data[i * 4 + 1] = g; im.data[i * 4 + 2] = g; im.data[i * 4 + 3] = 255;
+  }
+  cx.putImageData(im, 0, 0);
+  c.style.width = '112px';
+  const lab = document.createElement('div');
+  lab.textContent = label;
+  document.getElementById('row').appendChild(c);
+  document.getElementById('row').appendChild(lab);
+}
+templateCanvas('n', 'template n');
+
+// correlations
+function corr(a, b) {
+  let dot = 0, pa = 0, pb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; pa += a[i] * a[i]; pb += b[i] * b[i]; }
+  return Math.abs(dot) / Math.sqrt(pa * pb);
+}
+const nT = new Float32Array(TS * TS);
+{
+  const bin = atob(tjson.templates.n);
+  for (let i = 0; i < bin.length; i++) nT[i] = bin.charCodeAt(i) - offset;
+}
+const lines = [];
+lines.push('a5 vs n template: ' + corr(a5, nT).toFixed(3));
+lines.push('f6 vs n template: ' + corr(f6, nT).toFixed(3));
+// with shifts
+let best = 0, bestShift = '';
+for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+  const shifted = new Float32Array(TS * TS);
+  for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) {
+    const sx = x + dx, sy = y + dy;
+    shifted[y * TS + x] = (sx >= 0 && sy >= 0 && sx < TS && sy < TS) ? a5[sy * TS + sx] : 0;
+  }
+  const c = corr(shifted, nT);
+  if (c > best) { best = c; bestShift = dx + ',' + dy; }
+}
+lines.push('a5 vs n best shift ' + bestShift + ': ' + best.toFixed(3));
+document.getElementById('out').textContent = lines.join('\n');
+document.title = 'CELL DONE';
+</script>
+</body>
+</html>
