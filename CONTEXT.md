@@ -2,6 +2,31 @@
 
 本文件用于在多台电脑之间同步 Kimi Code 的对话上下文。每次会话结束时更新，另一台电脑上开始工作前请先阅读本文件。
 
+**版本约定**：每次推送更新时，`index.html` 右上角版本号（`vN · 高强度`）和 `sw.js` 的 `CACHE`（`duolingo-chess-vN`）同步 +1，确保用户浏览器能拿到新文件。
+
+---
+
+## 2026-11-07（第三轮）v12 交互改进
+
+### 改动（`js/app.js`、`js/engine.js`、`index.html`）
+1. 版本号 v11 → **v12**（含 sw.js CACHE v12）。
+2. 移除"现在轮到"选框（`state.turn` 恒为 'bottom'，仅开局 FEN 用）。
+3. 王车易位改为四选项：双方都不可(none) / 双方都可(auto，按棋子位置) / 下方不可(bottom) / 上方不可(top)。`castlingRights()` 按 `state.orientation` 把"下方/上方"映射到白/黑。
+4. 上方走子后**自动计算**（`performManualMove` 成功后直接调 `analyze()`）。
+5. 主按钮状态机（`updateAnalyzeButton`）：
+   - 无 game → "计算最佳着法"
+   - 建议显示中 & 历史非空 → "上一步"；建议显示中 & 历史空 → 隐藏
+   - 等待上方走子 → 隐藏；计算失败需重试（轮到下方但无建议）→ "计算最佳着法"
+   - "上一步" = `undoLastRound()`：每次分析出新建议时把上一轮快照 `{fen, bestMove, 展示文本}` 压栈（`state.lastSuggestion` 换入压栈），撤销时 `new Chess(entry.fen)` 恢复并重新显示旧建议。
+6. 引擎加载超时 25s → 60s（`js/engine.js`，弱网/首次加载更稳）。
+
+### 验证（fake 引擎端到端，/tmp/flowtest）
+上传 dark-knight.png → 识别 → 计算（d5→d6）→ 确认着子 → 上方 a7→a6 → **自动**算出 d6→c7 → 主按钮变"上一步" → 点击恢复 d5→d6 建议 ✓
+注意：内置浏览器里 Stockfish WASM worker 无任何响应（环境限制，WASM 本身正常），真机浏览器无此问题。
+
+### 待办
+- 真机验证引擎在 60s 超时内可加载。
+
 ---
 
 ## 2026-11-07（第二轮）暗底棋盘 + a5 黑马修复

@@ -19,7 +19,7 @@
         <p class="eyebrow">STOCKFISH 19 · 本地计算</p>
         <h1>棋盘助手</h1>
       </div>
-      <span class="strength">v11 · 高强度</span>
+      <span class="strength">v12 · 高强度</span>
     </header>
 
     <section class="intro">
@@ -60,16 +60,12 @@
             <option value="black">黑棋</option>
           </select>
         </label>
-        <label>现在轮到
-          <select id="turn">
-            <option value="bottom">下方走</option>
-            <option value="top">上方走</option>
-          </select>
-        </label>
         <label>王车易位
           <select id="castling">
             <option value="none">双方都不可</option>
-            <option value="auto">按棋子位置允许</option>
+            <option value="auto">双方都可</option>
+            <option value="bottom">下方不可</option>
+            <option value="top">上方不可</option>
           </select>
         </label>
       </div>
@@ -80,9 +76,9 @@
       <ol>
         <li>首次在 Duolingo 对局中截屏并导入，之后无需重复截图。</li>
         <li>计算后点击“确认着子”，下方会自动按建议落子。</li>
-        <li>点选上方棋子及高亮终点，再重新计算下方建议。</li>
+        <li>点选上方棋子及高亮终点，上方走子后会自动重新计算；主按钮可随时回到上一轮建议。</li>
       </ol>
-      <p class="history-note">王车易位默认禁止。只有确认本局仍可易位时，才选择“按棋子位置允许”；程序还会检查国王和车是否位于初始格。静图不设置吃过路兵。</p>
+      <p class="history-note">王车易位默认双方都不可。只有确认本局仍可易位时，才按实际情况选择；程序还会检查国王和车是否位于初始格。静图不设置吃过路兵。</p>
       <p>引擎在本机运行，首次加载约需几秒。请遵守所用产品的对局规则。</p>
     </details>
   </main>
