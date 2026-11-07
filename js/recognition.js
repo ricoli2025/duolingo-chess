@@ -1,4 +1,4 @@
-const DEFAULT_TEMPLATE_URL = new URL('../assets/piece-templates.json', import.meta.url);
+const DEFAULT_TEMPLATE_URL = new URL('../assets/piece-templates.json?v=2', import.meta.url);
 const BOARD_SIZE = 8;
 let cachedTemplates;
 
@@ -65,9 +65,15 @@ function decodeTemplates(data) {
     const binary = atob(data.templates[piece]);
     if (binary.length !== size * size) throw new TypeError('Invalid piece template length.');
     const values = new Float32Array(size * size);
-    let power = 0;
+    let mean = 0;
     for (let i = 0; i < binary.length; i++) {
       values[i] = binary.charCodeAt(i) - offset;
+      mean += values[i];
+    }
+    mean /= values.length;
+    let power = 0;
+    for (let i = 0; i < values.length; i++) {
+      values[i] -= mean;
       power += values[i] * values[i];
     }
     decoded.push({ piece, values, power: power / values.length });
@@ -357,58 +363,112 @@ function cellFeatures(image, row, col, size, offset) {
   }
   const background = median(corners);
   let energy = 0;
+  let pieceLumaSum = 0;
+  let pieceLumaCount = 0;
+  const deviation = 255 - offset;
   for (let i = 0; i < values.length; i++) {
-    values[i] = clamp(values[i] - background, -offset, 255 - offset);
+    const delta = values[i] - background;
+    if (Math.abs(delta) > 15) {
+      pieceLumaSum += values[i];
+      pieceLumaCount++;
+    }
+    values[i] = clamp(delta, -deviation, deviation);
     energy += Math.abs(values[i]);
   }
-  return { values, energy: energy / values.length };
+  return {
+    values,
+    energy: energy / values.length,
+    background,
+    pieceLuma: pieceLumaCount ? pieceLumaSum / pieceLumaCount : background
+  };
 }
 
-const MIN_PIECE_CORRELATION = 0.8;
-const MAX_NORMALIZED_PIECE_ERROR = 0.5;
-const MIN_PIECE_AMPLITUDE = 0.45;
-const MAX_PIECE_AMPLITUDE = 2.4;
+const MIN_PIECE_CORRELATION = 0.4;
+const MAX_NORMALIZED_PIECE_ERROR = 0.85;
+const WHITE_PIECE_LUMA = 140;
 
 function recognizeCells(image, templateData) {
   const { size, offset, templates } = templateData;
-  const squares = [];
-  const cellResults = [];
+  const features = [];
   for (let row = 0; row < BOARD_SIZE; row++) {
     for (let col = 0; col < BOARD_SIZE; col++) {
-      const cell = cellFeatures(image, row, col, size, offset);
+      features.push(cellFeatures(image, row, col, size, offset));
+    }
+  }
+  const squares = [];
+  const cellResults = [];
+  for (let index = 0; index < features.length; index++) {
+    const cell = features[index];
+    {
       let cellPower = 0;
       for (let i = 0; i < cell.values.length; i++) cellPower += cell.values[i] * cell.values[i];
       cellPower /= cell.values.length;
-      const scores = templates.map(template => {
-        let error = 0;
-        let dotProduct = 0;
+      const scoreTemplate = (template, dx, dy) => {
         const templatePower = template.power;
-        for (let i = 0; i < cell.values.length; i++) {
-          const difference = cell.values[i] - template.values[i];
-          error += difference * difference;
-          dotProduct += cell.values[i] * template.values[i];
+        let dotProduct = 0;
+        let overlapPower = 0;
+        for (let y = 0; y < size; y++) {
+          const ty = y + dy;
+          if (ty < 0 || ty >= size) continue;
+          for (let x = 0; x < size; x++) {
+            const tx = x + dx;
+            if (tx < 0 || tx >= size) continue;
+            const cv = cell.values[y * size + x];
+            dotProduct += cv * template.values[ty * size + tx];
+            overlapPower += cv * cv;
+          }
         }
-        const mse = error / cell.values.length;
-        const correlation = cellPower > 0 && templatePower > 0
-          ? dotProduct / cell.values.length / Math.sqrt(cellPower * templatePower)
-          : 0;
+        if (overlapPower <= 0 || templatePower <= 0) {
+          return { correlation: 0, mse: Infinity, gain: 0 };
+        }
+        const overlap = overlapPower / cell.values.length;
+        const gain = dotProduct / cell.values.length / templatePower;
+        let error = 0;
+        for (let y = 0; y < size; y++) {
+          const ty = y + dy;
+          if (ty < 0 || ty >= size) continue;
+          for (let x = 0; x < size; x++) {
+            const tx = x + dx;
+            if (tx < 0 || tx >= size) continue;
+            const difference = cell.values[y * size + x] - gain * template.values[ty * size + tx];
+            error += difference * difference;
+          }
+        }
+        return {
+          correlation: Math.abs(dotProduct) / cell.values.length / Math.sqrt(overlap * templatePower),
+          mse: error / cell.values.length,
+          gain
+        };
+      };
+      const coarse = templates.map(template => {
+        const result = scoreTemplate(template, 0, 0);
+        return { template, correlation: result.correlation };
+      }).sort((a, b) => b.correlation - a.correlation);
+      const scores = coarse.slice(0, 4).map(({ template }) => {
+        let best = { correlation: 0, mse: Infinity, gain: 0 };
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const result = scoreTemplate(template, dx, dy);
+            if (result.correlation > best.correlation) best = result;
+          }
+        }
         return {
           piece: template.piece,
-          mse,
-          correlation,
-          normalizedMse: mse / templatePower,
-          amplitude: Math.sqrt(cellPower / templatePower)
+          mse: best.mse,
+          correlation: best.correlation,
+          normalizedMse: cellPower > 0 ? best.mse / cellPower : 1,
+          amplitude: Math.abs(best.gain)
         };
-      }).sort((a, b) => a.mse - b.mse);
+      }).sort((a, b) => b.correlation - a.correlation);
 
       if (cell.energy < 7) {
         squares.push(null);
         const confidence = clamp((7 - cell.energy) / 4, 0.01, 1);
-        const result = { piece: null, confidence };
+        const result = { piece: null, confidence, energy: cell.energy };
         if (cell.energy > 3.5) {
           result.alternatives = [{
             piece: scores[0].piece,
-            confidence: Math.exp(-scores[0].mse / 1800) * 0.5
+            confidence: scores[0].correlation * 0.5
           }];
         }
         cellResults.push(result);
@@ -417,38 +477,35 @@ function recognizeCells(image, templateData) {
 
       const best = scores[0];
       const reliable = best.correlation >= MIN_PIECE_CORRELATION &&
-        best.normalizedMse <= MAX_NORMALIZED_PIECE_ERROR &&
-        best.amplitude >= MIN_PIECE_AMPLITUDE &&
-        best.amplitude <= MAX_PIECE_AMPLITUDE;
+        best.normalizedMse <= MAX_NORMALIZED_PIECE_ERROR;
       if (!reliable) {
         const correlationRejection = clamp((MIN_PIECE_CORRELATION - best.correlation) / 0.35);
         const errorRejection = clamp((best.normalizedMse - MAX_NORMALIZED_PIECE_ERROR) / 0.75);
-        const amplitudeRejection = best.amplitude < MIN_PIECE_AMPLITUDE
-          ? clamp((MIN_PIECE_AMPLITUDE - best.amplitude) / 0.3)
-          : clamp((best.amplitude - MAX_PIECE_AMPLITUDE) / 1.5);
-        const rejection = Math.max(correlationRejection, errorRejection, amplitudeRejection);
+        const rejection = Math.max(correlationRejection, errorRejection);
         squares.push(null);
         cellResults.push({
           piece: null,
           confidence: clamp(0.25 + rejection * 0.75),
           alternatives: scores.slice(0, 3).map(score => ({
             piece: score.piece,
-            confidence: Math.exp(-score.mse / 1800) * 0.5
+            confidence: score.correlation * 0.5
           }))
         });
         continue;
       }
 
-      const separation = clamp((scores[1].mse - best.mse) / Math.max(scores[1].mse, 1));
-      const fit = Math.exp(-best.mse / 1800);
+      const isWhite = cell.pieceLuma >= WHITE_PIECE_LUMA;
+      const piece = isWhite ? best.piece.toUpperCase() : best.piece.toLowerCase();
+      const separation = clamp((best.correlation - scores[1].correlation) / 0.4);
+      const fit = best.correlation;
       const confidence = clamp(fit * (0.7 + separation * 0.3));
-      squares.push(best.piece);
+      squares.push(piece);
       cellResults.push({
-        piece: best.piece,
+        piece,
         confidence,
         alternatives: scores.slice(1, 3).map(score => ({
           piece: score.piece,
-          confidence: Math.exp(-score.mse / 1800) * 0.5
+          confidence: score.correlation * 0.5
         }))
       });
     }
@@ -784,7 +841,9 @@ export async function recognizeBoard(source, options = {}) {
     ? options.orientation
     : detectOrientation(squares);
   const meanCellConfidence = cellResults.reduce((sum, cell) => sum + cell.confidence, 0) / 64;
-  const confidence = clamp(meanCellConfidence * 0.9 + location.confidence * 0.1);
+  const occupied = squares.filter(Boolean).length;
+  const coverage = clamp(occupied / 2, 0, 1);
+  const confidence = clamp((meanCellConfidence * 0.9 + location.confidence * 0.1) * coverage);
   return {
     squares,
     orientation,
