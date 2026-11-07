@@ -13,7 +13,7 @@ export class StockfishEngine {
       const timeout = setTimeout(() => {
         this.reset();
         reject(new Error('引擎加载超时，请重试'));
-      }, 25000);
+      }, 60000);
       worker.onmessage = (event) => {
         const line = event.data;
         if (typeof line === 'object' && line && Number.isFinite(line.percent)) {

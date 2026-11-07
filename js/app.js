@@ -13,7 +13,7 @@ const PROMOTIONS = { q: '后', r: '车', b: '象', n: '马' };
 const FILES = 'abcdefgh';
 const elements = Object.fromEntries([
   'screenshot-input', 'preview-section', 'screenshot-preview', 'status',
-  'position-section', 'confidence', 'board', 'orientation', 'turn', 'castling',
+  'position-section', 'confidence', 'board', 'orientation', 'castling',
   'analyze-button', 'result-section', 'best-move', 'uci-move', 'engine-detail',
   'confirm-move', 'promotion-dialog', 'promotion-options'
 ].map((id) => [id, document.getElementById(id)]));
@@ -30,7 +30,8 @@ const state = {
   pendingPromotion: null,
   analyzing: false,
   analysisId: 0,
-  bestMove: null
+  bestMove: null,
+  history: []
 };
 const engine = new StockfishEngine();
 
@@ -142,16 +143,33 @@ function clearResult() {
 function renderPosition() {
   elements['position-section'].hidden = false;
   elements.orientation.value = state.orientation;
-  elements.turn.value = state.turn;
   elements.castling.value = state.castling;
   elements.orientation.disabled = Boolean(state.game);
-  elements.turn.disabled = Boolean(state.game);
   elements.castling.disabled = Boolean(state.game);
   elements.confidence.textContent = `识别可信度 ${Math.round(state.confidence * 100)}%`;
-  if (!state.analyzing) {
-    elements['analyze-button'].textContent = state.game ? '重新计算最新着法' : '计算最佳着法';
-  }
+  updateAnalyzeButton();
   renderBoard();
+}
+
+function updateAnalyzeButton() {
+  const button = elements['analyze-button'];
+  if (state.analyzing) return;
+  if (!state.game) {
+    button.hidden = false;
+    button.textContent = '计算最佳着法';
+  } else if (state.bestMove) {
+    if (state.history.length) {
+      button.hidden = false;
+      button.textContent = '上一步';
+    } else {
+      button.hidden = true;
+    }
+  } else if (state.game.turn() === playerColor()) {
+    button.hidden = false;
+    button.textContent = '计算最佳着法';
+  } else {
+    button.hidden = true;
+  }
 }
 
 function logicalPlacement() {
@@ -178,6 +196,10 @@ function logicalPlacement() {
 
 function castlingRights() {
   if (state.castling === 'none') return '-';
+  const bottomColor = state.orientation === 'white' ? 'w' : 'b';
+  const sideAllowed = color =>
+    state.castling === 'auto' ||
+    (state.castling === 'bottom' ? color !== bottomColor : color === bottomColor);
   const chess = new Chess();
   chess.clear();
   for (let rank = 8; rank >= 1; rank--) {
@@ -190,11 +212,11 @@ function castlingRights() {
   }
   const at = (name) => chess.get(name);
   let rights = '';
-  if (at('e1')?.type === 'k' && at('e1')?.color === 'w') {
+  if (sideAllowed('w') && at('e1')?.type === 'k' && at('e1')?.color === 'w') {
     if (at('h1')?.type === 'r' && at('h1')?.color === 'w') rights += 'K';
     if (at('a1')?.type === 'r' && at('a1')?.color === 'w') rights += 'Q';
   }
-  if (at('e8')?.type === 'k' && at('e8')?.color === 'b') {
+  if (sideAllowed('b') && at('e8')?.type === 'k' && at('e8')?.color === 'b') {
     if (at('h8')?.type === 'r' && at('h8')?.color === 'b') rights += 'k';
     if (at('a8')?.type === 'r' && at('a8')?.color === 'b') rights += 'q';
   }
@@ -239,10 +261,34 @@ function confirmBestMove() {
 function performManualMove(move, promotion) {
   try {
     state.game.move({ from: move.from, to: move.to, promotion });
-    finishMove(`上方已走 ${move.from}${move.to}${promotion || ''}。点击“重新计算最新着法”。`);
   } catch {
     setStatus('这不是合法着法，请重新选择。', 'error');
+    return;
   }
+  finishMove(`上方已走 ${move.from}${move.to}${promotion || ''}。正在自动计算…`);
+  analyze();
+}
+
+function undoLastRound() {
+  const entry = state.history.pop();
+  if (!entry) return;
+  state.analysisId++;
+  state.analyzing = false;
+  state.game = new Chess(entry.fen);
+  state.bestMove = entry.bestMove;
+  state.lastSuggestion = entry;
+  syncFromGame();
+  resetSelection();
+  clearResult();
+  state.bestMove = entry.bestMove;
+  state.lastSuggestion = entry;
+  elements['result-section'].hidden = false;
+  elements['confirm-move'].hidden = false;
+  elements['best-move'].textContent = entry.bestMoveText;
+  elements['uci-move'].textContent = entry.uci;
+  elements['engine-detail'].textContent = entry.engineDetail;
+  renderPosition();
+  setStatus('已回到上一轮建议。可重新确认着子，或改走上方棋子。');
 }
 
 function choosePromotion(move) {
@@ -310,6 +356,7 @@ async function loadScreenshot(file) {
   state.analyzing = false;
   state.game = null;
   state.pendingPromotion = null;
+  state.history = [];
   resetSelection();
   clearResult();
   if (elements['promotion-dialog'].open) elements['promotion-dialog'].close();
@@ -377,6 +424,7 @@ async function analyze() {
   const analysisId = ++state.analysisId;
   const game = state.game;
   state.analyzing = true;
+  elements['analyze-button'].hidden = false;
   elements['analyze-button'].disabled = true;
   elements['analyze-button'].textContent = '正在加载引擎…';
   setStatus('正在计算下方最佳着法。', 'busy');
@@ -397,12 +445,21 @@ async function analyze() {
     if (bestMove === '(none)' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(bestMove)) throw new Error('引擎没有返回有效着法');
     const legal = game.moves({ verbose: true }).some((move) => move.from === bestMove.slice(0, 2) && move.to === bestMove.slice(2, 4) && (!move.promotion || move.promotion === bestMove[4]));
     if (!legal) throw new Error('识别结果与下棋规则不符，请重新截图');
+    if (state.lastSuggestion) state.history.push(state.lastSuggestion);
+    const promotion = bestMove[4] ? `（升变为${PROMOTIONS[bestMove[4]]}）` : '';
+    const bestMoveText = `${bestMove.slice(0, 2)} → ${bestMove.slice(2, 4)}${promotion}`;
+    state.lastSuggestion = {
+      fen: game.fen(),
+      bestMove,
+      bestMoveText,
+      uci: bestMove,
+      engineDetail: `Stockfish 19 · 用时 ${((performance.now() - started) / 1000).toFixed(1)} 秒`
+    };
     state.bestMove = bestMove;
     elements['confirm-move'].hidden = false;
-    const promotion = bestMove[4] ? `（升变为${PROMOTIONS[bestMove[4]]}）` : '';
-    elements['best-move'].textContent = `${bestMove.slice(0, 2)} → ${bestMove.slice(2, 4)}${promotion}`;
+    elements['best-move'].textContent = bestMoveText;
     elements['uci-move'].textContent = bestMove;
-    elements['engine-detail'].textContent = `Stockfish 19 · 用时 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
+    elements['engine-detail'].textContent = state.lastSuggestion.engineDetail;
     setStatus('建议已生成。点击“确认着子”自动落子，再移动上方棋子。');
     renderBoard();
   } catch (error) {
@@ -414,13 +471,16 @@ async function analyze() {
     if (analysisId === state.analysisId) {
       state.analyzing = false;
       elements['analyze-button'].disabled = false;
-      elements['analyze-button'].textContent = '重新计算最新着法';
+      updateAnalyzeButton();
     }
   }
 }
 
 elements['screenshot-input'].addEventListener('change', (event) => loadScreenshot(event.target.files[0]));
-elements['analyze-button'].addEventListener('click', analyze);
+elements['analyze-button'].addEventListener('click', () => {
+  if (state.game && state.bestMove && state.history.length) undoLastRound();
+  else analyze();
+});
 elements['confirm-move'].addEventListener('click', confirmBestMove);
 elements.board.addEventListener('click', (event) => {
   const square = event.target.closest('button[data-square]');
@@ -442,12 +502,6 @@ elements['promotion-dialog'].addEventListener('cancel', () => {
 elements.orientation.addEventListener('change', () => {
   if (state.game) return;
   state.orientation = elements.orientation.value;
-  clearResult();
-  renderBoard();
-});
-elements.turn.addEventListener('change', () => {
-  if (state.game) return;
-  state.turn = elements.turn.value;
   clearResult();
   renderBoard();
 });
