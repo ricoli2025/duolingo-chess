@@ -346,7 +346,7 @@ function normalizeBoard(sourceCanvas, board, size) {
 
 function cellFeatures(image, row, col, size, offset) {
   const values = new Float32Array(size * size);
-  const corners = [];
+  const borderLumas = [];
   const border = Math.max(1, Math.round(size * 0.075));
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -356,12 +356,22 @@ function cellFeatures(image, row, col, size, offset) {
       const data = image.data;
       const luma = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
       values[y * size + x] = luma;
-      if ((x < border || x >= size - border) && (y < border || y >= size - border)) {
-        corners.push(luma);
+      if (x < border || x >= size - border || y < border || y >= size - border) {
+        borderLumas.push(luma);
       }
     }
   }
-  const background = median(corners);
+  // The border ring is mostly board background, but a rounded highlight
+  // marker can cover it and skew the median. If the ring is non-uniform,
+  // fall back to the full-cell median, which the piece (well under half the
+  // cell) cannot skew.
+  const borderBackground = median(borderLumas);
+  let ringSpread = 0;
+  for (const luma of borderLumas) ringSpread += Math.abs(luma - borderBackground);
+  ringSpread /= borderLumas.length;
+  const sortedLumas = Array.from(values).sort((a, b) => a - b);
+  const cellMedian = sortedLumas[sortedLumas.length >> 1];
+  const background = ringSpread > 12 ? cellMedian : borderBackground;
   let energy = 0;
   let pieceLumaSum = 0;
   let pieceLumaCount = 0;
@@ -372,8 +382,8 @@ function cellFeatures(image, row, col, size, offset) {
       pieceLumaSum += values[i];
       pieceLumaCount++;
     }
-    values[i] = clamp(delta, -deviation, deviation);
-    energy += Math.abs(values[i]);
+    values[i] = clamp(Math.abs(delta), 0, deviation);
+    energy += values[i];
   }
   return {
     values,
@@ -399,6 +409,13 @@ function recognizeCells(image, templateData) {
   const cellResults = [];
   for (let index = 0; index < features.length; index++) {
     const cell = features[index];
+    if (cell.energy < 7) {
+      squares.push(null);
+      const confidence = clamp((7 - cell.energy) / 4, 0.01, 1);
+      const result = { piece: null, confidence, energy: cell.energy, luma: cell.pieceLuma };
+      cellResults.push(result);
+      continue;
+    }
     {
       let cellPower = 0;
       for (let i = 0; i < cell.values.length; i++) cellPower += cell.values[i] * cell.values[i];
@@ -440,18 +457,58 @@ function recognizeCells(image, templateData) {
           gain
         };
       };
-      const coarse = templates.map(template => {
-        const result = scoreTemplate(template, 0, 0);
-        return { template, correlation: result.correlation };
-      }).sort((a, b) => b.correlation - a.correlation);
-      const scores = coarse.slice(0, 4).map(({ template }) => {
-        let best = { correlation: 0, mse: Infinity, gain: 0 };
-        for (let dy = -2; dy <= 2; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
-            const result = scoreTemplate(template, dx, dy);
-            if (result.correlation > best.correlation) best = result;
+      const scoreCoarse = template => {
+        let dotProduct = 0;
+        let cellPow = 0;
+        let templatePow = 0;
+        for (let y = 0; y < size; y += 2) {
+          for (let x = 0; x < size; x += 2) {
+            const cv = cell.values[y * size + x];
+            const tv = template.values[y * size + x];
+            dotProduct += cv * tv;
+            cellPow += cv * cv;
+            templatePow += tv * tv;
           }
         }
+        if (cellPow <= 0 || templatePow <= 0) return 0;
+        return Math.abs(dotProduct) / Math.sqrt(cellPow * templatePow);
+      };
+      const coarse = templates.map(template => ({
+        template,
+        correlation: scoreCoarse(template)
+      })).sort((a, b) => b.correlation - a.correlation);
+      const scores = coarse.slice(0, 3).map(({ template }) => {
+        // Search shifts with stride-2 dot product (cheap), then compute the
+        // full error once for the winning alignment.
+        const templatePower2 = template.power;
+        let bestShift = { dx: 0, dy: 0 };
+        let bestCorrelation = -1;
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            let dotProduct = 0;
+            let overlapPower = 0;
+            for (let y = 0; y < size; y += 2) {
+              const ty = y + dy;
+              if (ty < 0 || ty >= size) continue;
+              for (let x = 0; x < size; x += 2) {
+                const tx = x + dx;
+                if (tx < 0 || tx >= size) continue;
+                const cv = cell.values[y * size + x];
+                dotProduct += cv * template.values[ty * size + tx];
+                overlapPower += cv * cv;
+              }
+            }
+            if (overlapPower <= 0 || templatePower2 <= 0) continue;
+            const samples = Math.ceil(size / 2) * Math.ceil(size / 2);
+            const overlap = overlapPower / samples;
+            const correlation = Math.abs(dotProduct) / samples / Math.sqrt(overlap * templatePower2);
+            if (correlation > bestCorrelation) {
+              bestCorrelation = correlation;
+              bestShift = { dx, dy };
+            }
+          }
+        }
+        const best = scoreTemplate(template, bestShift.dx, bestShift.dy);
         return {
           piece: template.piece,
           mse: best.mse,
@@ -460,20 +517,6 @@ function recognizeCells(image, templateData) {
           amplitude: Math.abs(best.gain)
         };
       }).sort((a, b) => b.correlation - a.correlation);
-
-      if (cell.energy < 7) {
-        squares.push(null);
-        const confidence = clamp((7 - cell.energy) / 4, 0.01, 1);
-        const result = { piece: null, confidence, energy: cell.energy };
-        if (cell.energy > 3.5) {
-          result.alternatives = [{
-            piece: scores[0].piece,
-            confidence: scores[0].correlation * 0.5
-          }];
-        }
-        cellResults.push(result);
-        continue;
-      }
 
       const best = scores[0];
       const reliable = best.correlation >= MIN_PIECE_CORRELATION &&
@@ -494,8 +537,7 @@ function recognizeCells(image, templateData) {
         continue;
       }
 
-      const isWhite = cell.pieceLuma >= WHITE_PIECE_LUMA;
-      const piece = isWhite ? best.piece.toUpperCase() : best.piece.toLowerCase();
+      const piece = best.piece.toLowerCase();
       const separation = clamp((best.correlation - scores[1].correlation) / 0.4);
       const fit = best.correlation;
       const confidence = clamp(fit * (0.7 + separation * 0.3));
@@ -503,11 +545,39 @@ function recognizeCells(image, templateData) {
       cellResults.push({
         piece,
         confidence,
+        luma: cell.pieceLuma,
         alternatives: scores.slice(1, 3).map(score => ({
           piece: score.piece,
           confidence: score.correlation * 0.5
         }))
       });
+    }
+  }
+  // Color by clustering piece luminance on this board: sort the detected
+  // pieces' luma and split at the largest gap. White pieces are always the
+  // brighter cluster, regardless of board theme.
+  const lumaValues = cellResults
+    .filter(cell => cell.piece && typeof cell.luma === 'number')
+    .map(cell => cell.luma)
+    .sort((a, b) => a - b);
+  if (lumaValues.length >= 2) {
+    let split = -1;
+    let splitGap = 12;
+    for (let i = 0; i + 1 < lumaValues.length; i++) {
+      const gap = lumaValues[i + 1] - lumaValues[i];
+      if (gap > splitGap) {
+        splitGap = gap;
+        split = i;
+      }
+    }
+    if (split >= 0) {
+      const threshold = (lumaValues[split] + lumaValues[split + 1]) / 2;
+      for (let i = 0; i < squares.length; i++) {
+        if (!squares[i]) continue;
+        const isWhite = cellResults[i].luma >= threshold;
+        squares[i] = isWhite ? squares[i].toUpperCase() : squares[i].toLowerCase();
+        cellResults[i].piece = squares[i];
+      }
     }
   }
   return { squares, cellResults };
@@ -553,10 +623,20 @@ export async function recognizeBoard(source, options = {}) {
   const sourceImage = sourceContext.getImageData(0, 0, dimensions.width, dimensions.height);
   const templateData = decodeTemplates(await templatePromise);
   const evaluationCache = new Map();
+  let evaluationBudget = 120;
+  const skippedEntry = {
+    squares: [],
+    cellResults: [],
+    location: null,
+    pieceEvidence: 0,
+    penalty: 99,
+    rank: -Infinity
+  };
   const evaluateLocation = location => {
     const { x, y, size } = location.board;
     const key = `${x},${y},${size}`;
     if (evaluationCache.has(key)) return evaluationCache.get(key);
+    if (evaluationBudget-- <= 0) return skippedEntry;
     const normalized = normalizeBoard(sourceCanvas, location.board, templateData.size);
     const recognized = recognizeCells(normalized, templateData);
     const pieceEvidence = recognized.cellResults.reduce((sum, cell, index) =>
@@ -569,7 +649,7 @@ export async function recognizeBoard(source, options = {}) {
       location,
       pieceEvidence,
       penalty,
-      rank: pieceEvidence * 20 + location.confidence + geometry * 30 - penalty * 50
+      rank: pieceEvidence * 25 + location.confidence + geometry * 30 - penalty * 15
     };
     evaluationCache.set(key, entry);
     return entry;
@@ -584,69 +664,137 @@ export async function recognizeBoard(source, options = {}) {
     }
     locations = [{ board: { x, y, size }, confidence: 1 }];
   } else {
-    const scanScale = Math.min(1, 640 / Math.max(dimensions.width, dimensions.height));
-    const scanCanvas = makeCanvas(
-      Math.max(1, Math.round(dimensions.width * scanScale)),
-      Math.max(1, Math.round(dimensions.height * scanScale))
-    );
-    const scanContext = scanCanvas.getContext('2d', { willReadFrequently: true });
-    scanContext.imageSmoothingEnabled = true;
-    scanContext.imageSmoothingQuality = 'high';
-    scanContext.drawImage(sourceCanvas, 0, 0, scanCanvas.width, scanCanvas.height);
-    const scanImage = scanContext.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-    const keys = new Set();
-    const addLocation = location => {
-      const key = `${location.board.x},${location.board.y},${location.board.size}`;
-      if (!keys.has(key)) {
-        keys.add(key);
-        locations.push(location);
+    // Fast path: Duolingo boards span the full image width, so x=0, size=width
+    // and only the vertical offset is unknown. Scan y with the cheap 64-sample
+    // checker score (~1k positions), then run full recognition on the few best.
+    const fullWidth = dimensions.width <= dimensions.height ? dimensions.width : 0;
+    const widthScan = [];
+    if (fullWidth) {
+      for (let y = 0; y + fullWidth <= dimensions.height; y += 2) {
+        const checker = checkerScore(sourceImage, 0, y, fullWidth, true);
+        if (checker < 4) continue;
+        const border = borderScore(sourceImage, 0, y, fullWidth);
+        const score = checker + border * 1.2;
+        widthScan.push({ y, score });
       }
-    };
-    const toOriginalLocation = candidate => {
-      const size = Math.min(candidate.size / scanScale, dimensions.width, dimensions.height);
-      const x = clamp(candidate.x / scanScale, 0, dimensions.width - size);
-      const y = clamp(candidate.y / scanScale, 0, dimensions.height - size);
-      const board = { x: Math.round(x), y: Math.round(y), size: Math.round(size) };
+      widthScan.sort((a, b) => b.score - a.score);
+    }
+    // The checker score repeats every cell height, so winners cluster in
+    // "phases" (y mod cell). Pick the best-scoring candidate of each phase so
+    // full recognition can arbitrate between them.
+    const cellHeight = fullWidth / BOARD_SIZE;
+    const phases = new Map();
+    for (const candidate of widthScan) {
+      const phase = Math.round(candidate.y / cellHeight);
+      const list = phases.get(phase) || [];
+      list.push(candidate);
+      list.sort((a, b) => b.score - a.score);
+      if (list.length > 2) list.pop();
+      phases.set(phase, list);
+    }
+    const phaseBest = [...phases.values()].flat()
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+    let widthBest;
+    for (const candidate of phaseBest) {
+      const board = { x: 0, y: candidate.y, size: fullWidth };
       const score = checkerScore(sourceImage, board.x, board.y, board.size, true);
-      return { board, confidence: clamp((score - 4) / 14), score };
-    };
-
-    const fastSize = Math.min(scanImage.width, scanImage.height);
-    const fastStep = Math.max(1, Math.round(fastSize / 100));
-    const fastCandidates = [];
-    for (let y = 0; y <= scanImage.height - fastSize; y += fastStep) {
-      for (let x = 0; x <= scanImage.width - fastSize; x += fastStep) {
-        const candidate = { x, y, size: fastSize };
-        const score = checkerScore(scanImage, x, y, fastSize);
-        if (score >= 4) fastCandidates.push({
-          ...candidate,
-          score: score + contentScore(scanImage, candidate) * 0.5 + exteriorUniformity(scanImage, x, y, fastSize) * 20
-        });
+      const entry = evaluateLocation({
+        board,
+        confidence: clamp((score - 4) / 14),
+        score
+      });
+      if (!widthBest || entry.rank > widthBest.rank) widthBest = entry;
+    }
+    if (widthBest && widthBest.squares.filter(Boolean).length >= 4) {
+      locations = [widthBest.location];
+      if (widthBest.squares.filter(Boolean).length < 28) {
+        // Local refinement around the winner: y ± a few px and size ± 1%.
+        const origin = widthBest.location.board;
+        for (const sizeOffset of [-2, -1, 0, 1, 2]) {
+          for (let yOffset = -10; yOffset <= 10; yOffset++) {
+            if (!sizeOffset && !yOffset) continue;
+            const size = origin.size + sizeOffset;
+            const y = origin.y + yOffset;
+            if (y < 0 || y + size > dimensions.height) continue;
+            const score = checkerScore(sourceImage, 0, y, size, true);
+            const entry = evaluateLocation({
+              board: { x: 0, y, size },
+              confidence: clamp((score - 4) / 14),
+              score
+            });
+            if (entry.rank > widthBest.rank) widthBest = entry;
+          }
+        }
+        locations = [widthBest.location];
       }
     }
-    fastCandidates.sort((a, b) => b.score - a.score);
-    let fastBest;
-    for (const candidate of fastCandidates.slice(0, 32)) {
-      const entry = evaluateLocation(toOriginalLocation(candidate));
-      if (!fastBest || entry.rank > fastBest.rank) fastBest = entry;
-    }
-    const fastGeometry = fastBest
-      ? exteriorUniformity(sourceImage, fastBest.location.board.x, fastBest.location.board.y, fastBest.location.board.size)
-      : 0;
-    const fastStable = fastBest && fastBest.penalty === 0 && fastBest.pieceEvidence > 12 && fastGeometry > 0.75;
-    if (fastBest && ((fastBest.squares.filter(Boolean).length >= 28 && fastBest.pieceEvidence > 15) || fastStable)) {
-      locations = [fastBest.location];
-    } else {
-      for (const candidate of fastCandidates.slice(0, 32)) addLocation(toOriginalLocation(candidate));
-      const gridCandidates = findGridCandidates(scanImage);
-      const candidates = gridCandidates.length >= 4 ? gridCandidates : findBoardCandidates(scanImage);
-      for (const candidate of candidates) addLocation(toOriginalLocation(candidate));
-      if (!locations.length) {
-        locations = [refineBoard(sourceImage, {
-          x: 0,
-          y: 0,
-          size: Math.min(dimensions.width, dimensions.height)
-        })];
+
+    if (!locations.length) {
+      const scanScale = Math.min(1, 640 / Math.max(dimensions.width, dimensions.height));
+      const scanCanvas = makeCanvas(
+        Math.max(1, Math.round(dimensions.width * scanScale)),
+        Math.max(1, Math.round(dimensions.height * scanScale))
+      );
+      const scanContext = scanCanvas.getContext('2d', { willReadFrequently: true });
+      scanContext.imageSmoothingEnabled = true;
+      scanContext.imageSmoothingQuality = 'high';
+      scanContext.drawImage(sourceCanvas, 0, 0, scanCanvas.width, scanCanvas.height);
+      const scanImage = scanContext.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+      const keys = new Set();
+      const addLocation = location => {
+        const key = `${location.board.x},${location.board.y},${location.board.size}`;
+        if (!keys.has(key)) {
+          keys.add(key);
+          locations.push(location);
+        }
+      };
+      const toOriginalLocation = candidate => {
+        const size = Math.min(candidate.size / scanScale, dimensions.width, dimensions.height);
+        const x = clamp(candidate.x / scanScale, 0, dimensions.width - size);
+        const y = clamp(candidate.y / scanScale, 0, dimensions.height - size);
+        const board = { x: Math.round(x), y: Math.round(y), size: Math.round(size) };
+        const score = checkerScore(sourceImage, board.x, board.y, board.size, true);
+        return { board, confidence: clamp((score - 4) / 14), score };
+      };
+
+      const fastSize = Math.min(scanImage.width, scanImage.height);
+      const fastStep = Math.max(1, Math.round(fastSize / 100));
+      const fastCandidates = [];
+      for (let y = 0; y <= scanImage.height - fastSize; y += fastStep) {
+        for (let x = 0; x <= scanImage.width - fastSize; x += fastStep) {
+          const candidate = { x, y, size: fastSize };
+          const score = checkerScore(scanImage, x, y, fastSize);
+          if (score >= 4) fastCandidates.push({
+            ...candidate,
+            score: score + contentScore(scanImage, candidate) * 0.5 + exteriorUniformity(scanImage, x, y, fastSize) * 20
+          });
+        }
+      }
+      fastCandidates.sort((a, b) => b.score - a.score);
+      let fastBest;
+      for (const candidate of fastCandidates.slice(0, 32)) {
+        const entry = evaluateLocation(toOriginalLocation(candidate));
+        if (!fastBest || entry.rank > fastBest.rank) fastBest = entry;
+      }
+      const fastGeometry = fastBest
+        ? exteriorUniformity(sourceImage, fastBest.location.board.x, fastBest.location.board.y, fastBest.location.board.size)
+        : 0;
+      const fastStable = fastBest && fastBest.penalty === 0 && fastBest.pieceEvidence > 12 && fastGeometry > 0.75;
+      if (fastBest && ((fastBest.squares.filter(Boolean).length >= 28 && fastBest.pieceEvidence > 15) || fastStable)) {
+        locations = [fastBest.location];
+      } else {
+        for (const candidate of fastCandidates.slice(0, 32)) addLocation(toOriginalLocation(candidate));
+        const gridCandidates = findGridCandidates(scanImage);
+        const candidates = gridCandidates.length >= 4 ? gridCandidates : findBoardCandidates(scanImage);
+        for (const candidate of candidates) addLocation(toOriginalLocation(candidate));
+        if (!locations.length) {
+          locations = [refineBoard(sourceImage, {
+            x: 0,
+            y: 0,
+            size: Math.min(dimensions.width, dimensions.height)
+          })];
+        }
       }
     }
   }
