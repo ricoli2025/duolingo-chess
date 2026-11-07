@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>template generator</title>
+</head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+const TS = 56;
+const IMAGES = [
+  {
+    src: 'images/puzzle.png',
+    board: [5, 934, 1164],
+    placements: {
+      e8: 'r', g8: 'k', a7: 'p', c7: 'q', d7: 'b', f7: 'p', h7: 'p',
+      a6: 'P', g6: 'p', c5: 'B', d5: 'p', d4: 'P',
+      d2: 'Q', f2: 'P', g2: 'P', e1: 'R', g1: 'K'
+    }
+  },
+  {
+    src: 'images/white-bottom.png',
+    board: [0, 855, 1170],
+    placements: {
+      a8: 'R', b8: 'N', c8: 'B', d8: 'K', e8: 'Q', f8: 'B', g8: 'N', h8: 'R',
+      a7: 'P', b7: 'P', c7: 'P', e7: 'P', f7: 'P', g7: 'P', h7: 'P',
+      d5: 'P',
+      a2: 'p', b2: 'p', c2: 'p', d2: 'p', e2: 'p', f2: 'p', g2: 'p', h2: 'p',
+      a1: 'r', b1: 'n', c1: 'b', d1: 'k', e1: 'q', f1: 'b', g1: 'n', h1: 'r'
+    }
+  },
+  {
+    src: 'images/black-bottom.png',
+    board: [0, 855, 1170],
+    placements: {
+      a8: 'r', b8: 'n', c8: 'b', d8: 'q', e8: 'k', f8: 'b', g8: 'n', h8: 'r',
+      a7: 'p', b7: 'p', c7: 'p', d7: 'p', e7: 'p', f7: 'p', g7: 'p', h7: 'p',
+      a2: 'P', b2: 'P', c2: 'P', d2: 'P', e2: 'P', f2: 'P', g2: 'P', h2: 'P',
+      a1: 'R', b1: 'N', c1: 'B', d1: 'Q', e1: 'K', f1: 'B', g1: 'N', h1: 'R'
+    }
+  }
+];
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('load failed: ' + src));
+    img.src = src;
+  });
+}
+
+function cropCell(img, board, square) {
+  const col = square.charCodeAt(0) - 97;
+  const row = 8 - Number(square[1]);
+  const [bx, by, bs] = board;
+  const cell = bs / 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = TS; canvas.height = TS;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, bx + col * cell, by + row * cell, cell, cell, 0, 0, TS, TS);
+  const data = ctx.getImageData(0, 0, TS, TS).data;
+  const values = new Float32Array(TS * TS);
+  const corners = [];
+  for (let y = 0; y < TS; y++) {
+    for (let x = 0; x < TS; x++) {
+      const i = (y * TS + x) * 4;
+      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      values[y * TS + x] = luma;
+      const cb = Math.max(3, Math.round(TS * 0.075));
+      if ((x < cb || x >= TS - cb) && (y < cb || y >= TS - cb)) corners.push(luma);
+    }
+  }
+  corners.sort((a, b) => a - b);
+  const bg = corners[corners.length >> 1];
+  for (let i = 0; i < values.length; i++) values[i] = Math.max(-100, Math.min(127, values[i] - bg));
+  return values;
+}
+
+function correlate(a, b, dx, dy) {
+  let dot = 0, pa = 0, pb = 0;
+  for (let y = 0; y < TS; y++) {
+    for (let x = 0; x < TS; x++) {
+      const tx = x + dx, ty = y + dy;
+      if (tx < 0 || ty < 0 || tx >= TS || ty >= TS) continue;
+      const av = a[y * TS + x], bv = b[ty * TS + tx];
+      dot += av * bv;
+      pa += av * av;
+      pb += bv * bv;
+    }
+  }
+  return pa > 0 && pb > 0 ? Math.abs(dot) / Math.sqrt(pa * pb) : 0;
+}
+
+const byType = {};
+for (const spec of IMAGES) {
+  const img = await loadImage(spec.src);
+  for (const [square, piece] of Object.entries(spec.placements)) {
+    (byType[piece] = byType[piece] || []).push(cropCell(img, spec.board, square));
+  }
+}
+
+const out = [];
+const templates = {};
+for (const piece of Object.keys(byType).sort()) {
+  const crops = byType[piece];
+  const ref = crops[0];
+  const acc = new Float32Array(TS * TS);
+  let aligned = 0;
+  for (const crop of crops) {
+    let best = { c: -1, dx: 0, dy: 0 };
+    for (let dy = -6; dy <= 6; dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        const c = correlate(crop, ref, dx, dy);
+        if (c > best.c) best = { c, dx, dy };
+      }
+    }
+    if (best.c < 0.5) {
+      out.push(`skip ${piece} corr=${best.c.toFixed(2)}`);
+      continue;
+    }
+    aligned++;
+    for (let y = 0; y < TS; y++) {
+      for (let x = 0; x < TS; x++) {
+        const sx = x - best.dx, sy = y - best.dy;
+        if (sx < 0 || sy < 0 || sx >= TS || sy >= TS) continue;
+        acc[y * TS + x] += crop[sy * TS + sx];
+      }
+    }
+  }
+  let mean = 0;
+  for (let i = 0; i < acc.length; i++) { acc[i] /= aligned; mean += acc[i]; }
+  mean /= acc.length;
+  let codes = '';
+  for (let i = 0; i < acc.length; i++) {
+    codes += String.fromCharCode(Math.max(0, Math.min(255, Math.round(acc[i] - mean) + 128)));
+  }
+  templates[piece] = btoa(codes);
+  out.push(`${piece}: ${crops.length} crops, ${aligned} aligned, mean0`);
+}
+
+const json = JSON.stringify({ version: 2, size: TS, offset: 128, encoding: 'base64-signed-luma', templates });
+const blob = new Blob([json], { type: 'application/json' });
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'piece-templates.json';
+a.click();
+out.push('DOWNLOADED bytes=' + json.length);
+document.getElementById('out').textContent = out.join('\n');
+document.title = 'GEN DONE';
+</script>
+</body>
+</html>

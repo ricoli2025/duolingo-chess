@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>sw-check</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+const lines = [];
+try {
+  const resp = await fetch('../assets/piece-templates.json');
+  const data = await resp.json();
+  lines.push('network-first fetch: size=' + data.size + ' offset=' + data.offset + ' version=' + (data.version || 1));
+  const keys = await caches.keys();
+  lines.push('caches: ' + JSON.stringify(keys));
+  for (const key of keys) {
+    const cache = await caches.open(key);
+    const match = await cache.match('../assets/piece-templates.json');
+    if (match) {
+      const d2 = await match.json();
+      lines.push(`cache ${key}: size=${d2.size} offset=${d2.offset} version=${(d2.version || 1)}`);
+    } else {
+      lines.push(`cache ${key}: no templates entry`);
+    }
+    const mjs = await cache.match('../js/recognition.js');
+    lines.push(`cache ${key}: recognition.js ${mjs ? 'present' : 'absent'}`);
+  }
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    lines.push('controller: ' + navigator.serviceWorker.controller.scriptURL);
+  } else {
+    lines.push('controller: none');
+  }
+} catch (e) {
+  lines.push('error: ' + e.message);
+}
+document.getElementById('out').textContent = lines.join('\n');
+document.title = 'SW CHECK DONE';
+</script>
+</body>
+</html>

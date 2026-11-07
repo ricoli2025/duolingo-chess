@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>inspect</title>
+<style>body{background:#333;color:#fff}canvas{image-rendering:pixelated;margin:4px;border:1px solid #666}</style>
+</head>
+<body>
+<div id="row1"></div>
+<div id="row2"></div>
+<pre id="out"></pre>
+<script type="module">
+const TS = 56;
+const tjson = await (await fetch('../assets/piece-templates.json?v=' + Date.now())).json();
+const offset = tjson.offset;
+
+function templateCanvas(key) {
+  const bin = atob(tjson.templates[key]);
+  const canvas = document.createElement('canvas');
+  canvas.width = TS; canvas.height = TS;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(TS, TS);
+  let mean = 0;
+  const vals = [];
+  for (let i = 0; i < bin.length; i++) { const v = bin.charCodeAt(i) - offset; vals.push(v); mean += v; }
+  mean /= vals.length;
+  for (let i = 0; i < vals.length; i++) {
+    const g = Math.max(0, Math.min(255, 128 + (vals[i] - mean) * 2));
+    img.data[i * 4] = g; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = g; img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+for (const key of ['N', 'n', 'B', 'b']) {
+  const c = templateCanvas(key);
+  c.style.width = '112px';
+  document.getElementById('row1').appendChild(c);
+  const label = document.createElement('span');
+  label.textContent = key + ' ';
+  document.getElementById('row1').appendChild(label);
+}
+
+// crop c5 from puzzle
+const img = new Image();
+await new Promise(res => { img.onload = res; img.src = 'images/puzzle.png'; });
+function cellCanvas(board, square) {
+  const col = square.charCodeAt(0) - 97;
+  const row = 8 - Number(square[1]);
+  const [bx, by, bs] = board;
+  const cell = bs / 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = TS; canvas.height = TS;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, bx + col * cell, by + row * cell, cell, cell, 0, 0, TS, TS);
+  return canvas;
+}
+for (const sq of ['c5', 'd7']) {
+  const c = cellCanvas([5, 934, 1164], sq);
+  c.style.width = '112px';
+  document.getElementById('row2').appendChild(c);
+  const label = document.createElement('span');
+  label.textContent = sq + ' ';
+  document.getElementById('row2').appendChild(label);
+}
+document.title = 'INSPECT DONE';
+</script>
+</body>
+</html>

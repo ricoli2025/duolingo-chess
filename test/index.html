@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>recognition test</title>
+</head>
+<body>
+<pre id="out">running…</pre>
+<div id="previews"></div>
+<script type="module">
+import { recognizeBoard, drawRecognitionPreview } from '../js/recognition.js?v=10';
+
+const CASES = [
+  {
+    name: 'puzzle',
+    src: 'images/puzzle.png',
+    expected: [
+      '....r.k.',
+      'p.qb.p.p',
+      'P.....p.',
+      '..Bp....',
+      '...P....',
+      '........',
+      '...Q.PP.',
+      '....R.K.'
+    ]
+  },
+  {
+    name: 'white-bottom',
+    src: 'images/white-bottom.png',
+    expected: [
+      'RNBKQBNR',
+      'PPP.PPPP',
+      '........',
+      '...P....',
+      '........',
+      '........',
+      'pppppppp',
+      'rnbkqbnr'
+    ]
+  },
+  {
+    name: 'black-bottom',
+    src: 'images/black-bottom.png',
+    expected: [
+      'rnbqkbnr',
+      'pppppppp',
+      '........',
+      '........',
+      '........',
+      '........',
+      'PPPPPPPP',
+      'RNBQKBNR'
+    ]
+  }
+];
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('load failed: ' + src));
+    img.src = src;
+  });
+}
+
+const TEMPLATE_VERSION = "v12";
+const out = [];
+function debugCells(img, board) {
+  const s = 320;
+  const canvas = document.createElement('canvas');
+  canvas.width = s; canvas.height = s;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, board.x, board.y, board.size, board.size, 0, 0, s, s);
+  const data = ctx.getImageData(0, 0, s, s);
+  const lines = [];
+  const cell = s / 8;
+  for (let row = 0; row < 8; row++) {
+    let line = '';
+    for (let col = 0; col < 8; col++) {
+      const corners = [];
+      let sum = 0;
+      for (let y = 0; y < cell; y++) {
+        for (let x = 0; x < cell; x++) {
+          const sx = col * cell + x, sy = row * cell + y;
+          const i = (sy * s + sx) * 4;
+          const luma = data.data[i] * 0.299 + data.data[i + 1] * 0.587 + data.data[i + 2] * 0.114;
+          sum += luma;
+          if ((x < 3 || x >= cell - 3) && (y < 3 || y >= cell - 3)) corners.push(luma);
+        }
+      }
+      corners.sort((a, b) => a - b);
+      const bg = corners[corners.length >> 1];
+      let dev = 0;
+      for (let y = 4; y < cell - 4; y++) {
+        for (let x = 4; x < cell - 4; x++) {
+          const sx = col * cell + x, sy = row * cell + y;
+          const i = (sy * s + sx) * 4;
+          const luma = data.data[i] * 0.299 + data.data[i + 1] * 0.587 + data.data[i + 2] * 0.114;
+          dev += Math.abs(luma - bg);
+        }
+      }
+      const n = (cell - 8) * (cell - 8);
+      line += dev / n < 10 ? '.' : (bg > 128 ? (sum / (cell * cell) < bg - 40 ? 'x' : 'o') : (sum / (cell * cell) > bg + 40 ? 'X' : 'O'));
+    }
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+async function diagAlignment(img, board, row, col) {
+  const s = 320, ts = 40;
+  const canvas = document.createElement('canvas');
+  canvas.width = s; canvas.height = s;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, board.x, board.y, board.size, board.size, 0, 0, s, s);
+  const data = ctx.getImageData(0, 0, s, s);
+  const cell = new Float32Array(ts * ts);
+  const corners = [];
+  for (let y = 0; y < ts; y++) {
+    for (let x = 0; x < ts; x++) {
+      const sx = col * ts + x, sy = row * ts + y;
+      const i = (sy * s + sx) * 4;
+      const luma = data.data[i] * 0.299 + data.data[i + 1] * 0.587 + data.data[i + 2] * 0.114;
+      cell[y * ts + x] = luma;
+      if ((x < 3 || x >= ts - 3) && (y < 3 || y >= ts - 3)) corners.push(luma);
+    }
+  }
+  corners.sort((a, b) => a - b);
+  const bg = corners[corners.length >> 1];
+  for (let i = 0; i < cell.length; i++) cell[i] -= bg;
+  const tjson = await (await fetch('../assets/piece-templates.json?v=' + TEMPLATE_VERSION)).json();
+  const offset = tjson.offset;
+  const lines = [];
+  for (const key of ['p', 'n', 'b', 'r', 'q', 'k']) {
+    const bin = atob(tjson.templates[key]);
+    const t = new Float32Array(ts * ts);
+    let mean = 0;
+    for (let i = 0; i < bin.length; i++) { t[i] = bin.charCodeAt(i) - offset; mean += t[i]; }
+    mean /= t.length;
+    let tp = 0;
+    for (let i = 0; i < t.length; i++) { t[i] -= mean; tp += t[i] * t[i]; }
+    let best = -1;
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        let dot = 0, cp = 0, tq = 0;
+        for (let y = 0; y < ts; y++) {
+          for (let x = 0; x < ts; x++) {
+            const tx = x + dx, ty = y + dy;
+            if (tx < 0 || ty < 0 || tx >= ts || ty >= ts) continue;
+            const cv = cell[y * ts + x], tv = t[ty * ts + tx];
+            dot += cv * tv;
+            cp += cv * cv;
+            tq += tv * tv;
+          }
+        }
+        const c = cp > 0 && tq > 0 ? Math.abs(dot) / Math.sqrt(cp * tq) : 0;
+        if (c > best) best = c;
+      }
+    }
+    lines.push(key + '=' + best.toFixed(3));
+  }
+  return lines.join(' ');
+}
+let allPass = true;
+for (const testCase of CASES) {
+  const img = await loadImage(testCase.src);
+  const result = await recognizeBoard(img);
+  window.__lastResults = window.__lastResults || {};
+  window.__lastResults[testCase.name] = result;
+  const expectedFlat = testCase.expected.join('');
+  const actualFlat = result.squares.map(s => s || '.').join('');
+  const errors = [];
+  for (let i = 0; i < 64; i++) {
+    if (actualFlat[i] !== expectedFlat[i]) {
+      const label = expectedFlat[i] === '.' ? 'extra' : `expected ${expectedFlat[i]}, got ${actualFlat[i] || '(null)'}`;
+      errors.push(
+        `  ${testCase.name} ${'abcdefgh'[i % 8]}${8 - Math.floor(i / 8)}: ${label} conf=${result.cellResults[i].confidence.toFixed(2)} alt=${JSON.stringify((result.cellResults[i].alternatives || []).map(a => a.piece + ':' + a.confidence.toFixed(2)))}`
+      );
+    }
+  }
+  out.push(`== ${testCase.name}: board=(${result.board.x},${result.board.y},${result.board.size}) conf=${result.confidence.toFixed(2)} ${errors.length ? 'FAIL' : 'PASS'}`);
+  for (let i = 0, shown = 0; i < 64 && shown < 4; i++) {
+    if (actualFlat[i] !== expectedFlat[i]) {
+      out.push(`   diag ${'abcdefgh'[i % 8]}${8 - Math.floor(i / 8)}: ` + await diagAlignment(img, result.board, Math.floor(i / 8), i % 8));
+      shown++;
+    }
+  }
+  out.push(...errors);
+  out.push('   actual: ' + actualFlat.match(/.{8}/g).join(' '));
+  out.push('   debug:\n' + debugCells(img, result.board));
+  if (errors.length) allPass = false;
+
+  const canvas = document.createElement('canvas');
+  drawRecognitionPreview(img, result, canvas);
+  canvas.style.maxWidth = '300px';
+  document.getElementById('previews').appendChild(canvas);
+}
+out.push(allPass ? 'ALL PASS' : 'SOME FAIL');
+document.getElementById('out').textContent = out.join('\n');
+document.title = allPass ? 'ALL PASS' : 'SOME FAIL';
+</script>
+</body>
+</html>
