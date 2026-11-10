@@ -48,6 +48,23 @@ function playerColor() {
   return state.orientation === 'white' ? 'w' : 'b';
 }
 
+const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+
+// Duolingo scores draws against the player, so the engine should avoid
+// drawish lines — unless the bottom side is materially lost anyway.
+function shouldAvoidDraw() {
+  let bottom = 0;
+  let top = 0;
+  for (const piece of state.squares) {
+    if (!piece) continue;
+    const value = PIECE_VALUES[piece.toLowerCase()] || 0;
+    const isBottom = (piece === piece.toUpperCase()) === (state.orientation === 'white');
+    if (isBottom) bottom += value;
+    else top += value;
+  }
+  return bottom - top > -8;
+}
+
 function opponentColor() {
   return playerColor() === 'w' ? 'b' : 'w';
 }
@@ -440,7 +457,7 @@ async function analyze() {
         elements['analyze-button'].textContent = `正在计算 · 深度 ${progress.depth}`;
         elements['engine-detail'].textContent = `Stockfish 19 · 搜索深度 ${progress.depth}`;
       }
-    });
+    }, { playerColor: playerColor(), avoidDraw: shouldAvoidDraw() });
     if (analysisId !== state.analysisId || game !== state.game) return;
     if (bestMove === '(none)' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(bestMove)) throw new Error('引擎没有返回有效着法');
     const legal = game.moves({ verbose: true }).some((move) => move.from === bestMove.slice(0, 2) && move.to === bestMove.slice(2, 4) && (!move.promotion || move.promotion === bestMove[4]));
