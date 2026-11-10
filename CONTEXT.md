@@ -6,6 +6,24 @@
 
 ---
 
+## 2026-11-11（第四轮）v13 回避和棋
+
+### 需求
+Duolingo 里平局对玩家扣分，所以引擎不应主动追求平局；除非子力大幅落后（接受和棋更好）。
+
+### 实现
+- SF19 lite 无 Contempt 参数（WASM 字符串已确认）。改用 **MultiPV 3 + 着法筛选**：
+  - `engine.analyze(fen, ms, cb, { playerColor, avoidDraw })` 每次分析前发 `setoption name MultiPV value 3`；
+  - `handleMessage` 记录每个 PV 的最新评分（cp/mate）和着法到 `pvMap`；
+  - `bestmove` 到达时经 `pickMove()` 筛选：首选 |eval| ≥ 25cp（或有杀）→ 用首选；首选趋于和棋（|eval| < 25cp）→ 在其余 PV 里选玩家视角最优的不平衡着法；全是和棋 → 用首选。mate 分数映射为 ±100000∓|mate|。
+- `app.js` 新增 `shouldAvoidDraw()`：数 `state.squares` 子力（P1 N3 B3 R5 Q9），下方 − 上方 > −8（约一个车）才回避和棋，否则接受。
+- 版本 v13（sw CACHE 同步）。
+
+### 测试
+`test/pickmove.html` 7 个用例全过（优势保持首选/和棋转向/黑方视角/全和棋保持/落后保持/首选杀棋/负杀守和）。
+
+---
+
 ## 2026-11-07（第三轮）v12 交互改进
 
 ### 改动（`js/app.js`、`js/engine.js`、`index.html`）
