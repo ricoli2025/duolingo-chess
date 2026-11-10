@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>pickmove test</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+import { StockfishEngine } from '../js/engine.js';
+
+const lines = [];
+const out = document.getElementById('out');
+function log(m) { lines.push(m); out.textContent = lines.join('\n'); }
+
+function run(engineBest, infoLines, opts) {
+  const engine = new StockfishEngine();
+  let result = null;
+  engine.active = {
+    pvMap: new Map(),
+    sideToMove: opts.sideToMove,
+    playerColor: opts.playerColor,
+    avoidDraw: opts.avoidDraw,
+    timeout: setTimeout(() => {}, 99999),
+    onProgress: () => {},
+    resolve: m => { result = m; },
+    reject: () => {}
+  };
+  for (const l of infoLines) engine.handleMessage(l);
+  engine.handleMessage('bestmove ' + engineBest);
+  clearTimeout(engine.active ? engine.active.timeout : 0);
+  return result;
+}
+
+const info = (multipv, kind, value, move) =>
+  `info depth 24 multipv ${multipv} score ${kind} ${value} pv ${move}`;
+
+let pass = 0, fail = 0;
+function check(name, actual, expected) {
+  if (actual === expected) { pass++; log(`PASS ${name} -> ${actual}`); }
+  else { fail++; log(`FAIL ${name}: expected ${expected}, got ${actual}`); }
+}
+
+// 1. 首选 +50cp（明确优势）：保持首选
+check('clear edge keeps best', run('e2e4', [
+  info(1, 'cp', 50, 'e2e4'), info(2, 'cp', 10, 'd2d4')
+], { sideToMove: 'w', playerColor: 'w', avoidDraw: true }), 'e2e4');
+
+// 2. 首选 +8cp（接近和棋），备选 +35cp：改选备选
+check('drawish best switches', run('d2d4', [
+  info(1, 'cp', 8, 'd2d4'), info(2, 'cp', 35, 'c2c4')
+], { sideToMove: 'w', playerColor: 'w', avoidDraw: true }), 'c2c4');
+
+// 3. 黑方走子、玩家执黑：分数从黑方视角反转
+check('black perspective', run('d7d5', [
+  info(1, 'cp', 5, 'd7d5'), info(2, 'cp', -40, 'g8f6')
+], { sideToMove: 'b', playerColor: 'b', avoidDraw: true }), 'g8f6');
+
+// 4. 所有选择都和棋：保持首选
+check('all drawish keeps best', run('e2e4', [
+  info(1, 'cp', 5, 'e2e4'), info(2, 'cp', -3, 'd2d4'), info(3, 'cp', 0, 'g1f3')
+], { sideToMove: 'w', playerColor: 'w', avoidDraw: true }), 'e2e4');
+
+// 5. 大幅落后（avoidDraw=false）：保持首选
+check('losing keeps best', run('e2e4', [
+  info(1, 'cp', 4, 'e2e4'), info(2, 'cp', 30, 'd2d4')
+], { sideToMove: 'w', playerColor: 'w', avoidDraw: false }), 'e2e4');
+
+// 6. 有杀棋备选：选杀棋
+check('mate preferred', run('d2d4', [
+  info(1, 'cp', 6, 'd2d4'), info(2, 'mate', 5, 'd1h5')
+], { sideToMove: 'w', playerColor: 'w', avoidDraw: true }), 'd1h5');
+
+// 7. 首选被将杀（mate 负）：保持首选（守杀）
+check('forced defense keeps best', run('e2e4', [
+  info(1, 'mate', -6, 'e2e4'), info(2, 'cp', -200, 'd2d4')
+], { sideToMove: 'w', playerColor: 'w', avoidDraw: true }), 'e2e4');
+
+log(`${pass} pass, ${fail} fail`);
+document.title = fail === 0 ? 'PICKMOVE ALL PASS' : 'PICKMOVE FAIL';
+</script>
+</body>
+</html>
