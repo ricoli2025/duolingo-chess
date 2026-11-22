@@ -1,4 +1,4 @@
-const CACHE = 'duolingo-chess-v14';
+const CACHE = 'duolingo-chess-v15';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'assets/icon.svg',
   'assets/piece-templates.json', 'js/app.js', 'js/engine.js', 'js/recognition.js',
