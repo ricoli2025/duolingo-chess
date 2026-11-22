@@ -13,7 +13,7 @@ const PROMOTIONS = { q: '后', r: '车', b: '象', n: '马' };
 const FILES = 'abcdefgh';
 const elements = Object.fromEntries([
   'screenshot-input', 'preview-section', 'screenshot-preview', 'status',
-  'position-section', 'confidence', 'board', 'orientation', 'castling',
+  'position-section', 'confidence', 'board', 'orientation', 'castling-top', 'castling-bottom',
   'analyze-button', 'result-section', 'best-move', 'uci-move', 'engine-detail',
   'confirm-move', 'promotion-dialog', 'promotion-options'
 ].map((id) => [id, document.getElementById(id)]));
@@ -22,7 +22,8 @@ const state = {
   squares: Array(64).fill(null),
   orientation: 'white',
   turn: 'bottom',
-  castling: 'none',
+  castlingTop: false,
+  castlingBottom: false,
   confidence: 1,
   game: null,
   selected: null,
@@ -46,23 +47,6 @@ function opposite(color) {
 
 function playerColor() {
   return state.orientation === 'white' ? 'w' : 'b';
-}
-
-const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9 };
-
-// Duolingo scores draws against the player, so the engine should avoid
-// drawish lines — unless the bottom side is materially lost anyway.
-function shouldAvoidDraw() {
-  let bottom = 0;
-  let top = 0;
-  for (const piece of state.squares) {
-    if (!piece) continue;
-    const value = PIECE_VALUES[piece.toLowerCase()] || 0;
-    const isBottom = (piece === piece.toUpperCase()) === (state.orientation === 'white');
-    if (isBottom) bottom += value;
-    else top += value;
-  }
-  return bottom - top > -8;
 }
 
 function opponentColor() {
@@ -160,9 +144,11 @@ function clearResult() {
 function renderPosition() {
   elements['position-section'].hidden = false;
   elements.orientation.value = state.orientation;
-  elements.castling.value = state.castling;
+  elements['castling-top'].checked = state.castlingTop;
+  elements['castling-bottom'].checked = state.castlingBottom;
   elements.orientation.disabled = Boolean(state.game);
-  elements.castling.disabled = Boolean(state.game);
+  elements['castling-top'].disabled = Boolean(state.game);
+  elements['castling-bottom'].disabled = Boolean(state.game);
   elements.confidence.textContent = `识别可信度 ${Math.round(state.confidence * 100)}%`;
   updateAnalyzeButton();
   renderBoard();
@@ -212,11 +198,9 @@ function logicalPlacement() {
 }
 
 function castlingRights() {
-  if (state.castling === 'none') return '-';
+  if (!state.castlingTop && !state.castlingBottom) return '-';
   const bottomColor = state.orientation === 'white' ? 'w' : 'b';
-  const sideAllowed = color =>
-    state.castling === 'auto' ||
-    (state.castling === 'bottom' ? color !== bottomColor : color === bottomColor);
+  const sideAllowed = color => color === bottomColor ? state.castlingBottom : state.castlingTop;
   const chess = new Chess();
   chess.clear();
   for (let rank = 8; rank >= 1; rank--) {
@@ -457,7 +441,7 @@ async function analyze() {
         elements['analyze-button'].textContent = `正在计算 · 深度 ${progress.depth}`;
         elements['engine-detail'].textContent = `Stockfish 19 · 搜索深度 ${progress.depth}`;
       }
-    }, { playerColor: playerColor(), avoidDraw: shouldAvoidDraw() });
+    });
     if (analysisId !== state.analysisId || game !== state.game) return;
     if (bestMove === '(none)' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(bestMove)) throw new Error('引擎没有返回有效着法');
     const legal = game.moves({ verbose: true }).some((move) => move.from === bestMove.slice(0, 2) && move.to === bestMove.slice(2, 4) && (!move.promotion || move.promotion === bestMove[4]));
@@ -522,9 +506,15 @@ elements.orientation.addEventListener('change', () => {
   clearResult();
   renderBoard();
 });
-elements.castling.addEventListener('change', () => {
+elements['castling-top'].addEventListener('change', () => {
   if (state.game) return;
-  state.castling = elements.castling.value;
+  state.castlingTop = elements['castling-top'].checked;
+  clearResult();
+  renderBoard();
+});
+elements['castling-bottom'].addEventListener('change', () => {
+  if (state.game) return;
+  state.castlingBottom = elements['castling-bottom'].checked;
   clearResult();
   renderBoard();
 });

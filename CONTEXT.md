@@ -6,6 +6,16 @@
 
 ---
 
+## 2026-11-22（第五轮）v14 恢复原始最佳着法与独立易位开关
+
+### 需求与修改
+- 移除 v13 的 MultiPV 3、PV 评分收集及 `pickMove()` 避和棋替换逻辑，Stockfish 的 `bestmove` 直接作为建议；3.5 秒搜索时间与 60 秒加载超时保持不变。
+- 删除 `shouldAvoidDraw()` 及 `engine.analyze()` 的玩家颜色/避和棋参数。
+- 王车易位从四选一改为同一行的“上方可易位”“下方可易位”两个滑动开关，默认关闭；`castlingTop` / `castlingBottom` 分别控制双方，仍检查国王和车是否位于初始格。
+- 版本 v14，sw CACHE 同步；`test/pickmove.html` 改为验证 bestmove 原样返回及不再发送 MultiPV。
+
+---
+
 ## 2026-11-11（第四轮）v13 回避和棋
 
 ### 需求

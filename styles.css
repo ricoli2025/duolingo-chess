@@ -49,9 +49,18 @@ p { line-height: 1.55; }
 .square.move-to { box-shadow: inset 0 0 0 4px var(--green); }
 .piece-image { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .coordinate { position: absolute; bottom: 2px; left: 3px; font-size: 9px; color: #b8c6cd99; pointer-events: none; }
-.controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
-.controls label { color: var(--muted); font-size: 12px; }
+.controls { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr); gap: 12px; margin: 12px 0; }
+.controls label, .control-label { color: var(--muted); font-size: 12px; }
 select { display: block; width: 100%; margin-top: 6px; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; color: #edf3f6; background: var(--panel); }
+.castling-switches { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-top: 6px; }
+.switch-item { position: relative; display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.switch-item input { position: absolute; right: 0; width: 44px; height: 26px; margin: 0; opacity: 0; z-index: 2; cursor: pointer; }
+.switch-slider { position: relative; width: 44px; height: 26px; flex: 0 0 auto; border-radius: 99px; background: #46555f; transition: background .18s; }
+.switch-slider::after { content: ""; position: absolute; width: 20px; height: 20px; top: 3px; left: 3px; border-radius: 50%; background: #fff; transition: transform .18s; }
+.switch-item input:checked + .switch-slider { background: var(--green); }
+.switch-item input:checked + .switch-slider::after { transform: translateX(18px); }
+.switch-item input:focus-visible + .switch-slider { outline: 3px solid #ffd64d; outline-offset: 2px; }
+.switch-item input:disabled + .switch-slider { opacity: .45; cursor: default; }
 .history-note { color: var(--muted); background: #121d24; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5; margin: 10px 0 14px; }
 .analyze { width: 100%; background: var(--green); color: #102006; font-size: 17px; }
 .confirm-move { margin-top: 10px; }
