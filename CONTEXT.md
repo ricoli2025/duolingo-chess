@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-11-23 v16 Castle the King 标签与两行对齐
+
+- 标题改为 `Castle the King`，与左侧“下方执子”同一水平线；开关文字简化为“上方可”“下方可”，开关组与下方白棋/黑棋选框对齐。版本 v16，sw CACHE 同步。
+
+---
+
 ## 2026-11-23 v15 易位开关对齐
 
 - `.controls` 垂直居中，`.castling-field` 与 `.castling-switches` 改为水平 flex 布局；两个易位开关与左侧白棋/黑棋下拉框水平对齐。版本 v15，sw CACHE 同步。
