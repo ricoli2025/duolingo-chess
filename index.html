@@ -19,7 +19,7 @@
         <p class="eyebrow">STOCKFISH 19 · 本地计算</p>
         <h1>棋盘助手</h1>
       </div>
-      <span class="strength">v16 · 高强度</span>
+      <span class="strength">v15 · 高强度</span>
     </header>
 
     <section class="intro">
@@ -54,12 +54,12 @@
       </section>
 
       <div class="controls">
-        <label>下方执子
-          <select id="orientation">
-            <option value="white">白棋</option>
-            <option value="black">黑棋</option>
-          </select>
-        </label>
+        <div class="color-field">
+          <span class="control-label">下方执白</span>
+          <div class="color-switch">
+            <label class="switch-item"><input id="orientation" type="checkbox" role="switch" aria-label="下方执白"><span class="switch-slider"></span></label>
+          </div>
+        </div>
         <div class="castling-field">
           <span class="control-label">Castle the King</span>
           <div class="castling-switches">

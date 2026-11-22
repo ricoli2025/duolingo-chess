@@ -53,6 +53,7 @@ p { line-height: 1.55; }
 .controls label, .control-label { color: var(--muted); font-size: 12px; }
 select { display: block; width: 100%; margin-top: 6px; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; color: #edf3f6; background: var(--panel); }
 .castling-field { display: block; }
+.color-switch { display: flex; align-items: center; min-height: 44px; margin-top: 6px; }
 .castling-switches { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-top: 6px; }
 .switch-item { position: relative; display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
 .switch-item input { position: absolute; right: 0; width: 44px; height: 26px; margin: 0; opacity: 0; z-index: 2; cursor: pointer; }

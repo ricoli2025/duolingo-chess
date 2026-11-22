@@ -143,7 +143,7 @@ function clearResult() {
 
 function renderPosition() {
   elements['position-section'].hidden = false;
-  elements.orientation.value = state.orientation;
+  elements.orientation.checked = state.orientation === 'white';
   elements['castling-top'].checked = state.castlingTop;
   elements['castling-bottom'].checked = state.castlingBottom;
   elements.orientation.disabled = Boolean(state.game);
@@ -502,7 +502,7 @@ elements['promotion-dialog'].addEventListener('cancel', () => {
 });
 elements.orientation.addEventListener('change', () => {
   if (state.game) return;
-  state.orientation = elements.orientation.value;
+  state.orientation = elements.orientation.checked ? 'white' : 'black';
   clearResult();
   renderBoard();
 });
